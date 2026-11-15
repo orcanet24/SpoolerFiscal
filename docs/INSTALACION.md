@@ -190,6 +190,32 @@ la térmica. La tecla `p` + Enter alterna el sensor de papel para probar la
 pausa y reanudación de la cola; `estado` muestra los correlativos; `salir`
 cierra guardando el estado en `data\simprint_state.json`.
 
+### Ver la factura en el panel de SimuladorFiscalGO (puente TCP→panel)
+
+Con `-panel`, `simprint` recibe el protocolo por TCP y lo reenvía por HTTP al
+panel web de **SimuladorFiscalGO**: la factura se ve en el papel virtual del
+navegador (`http://127.0.0.1:8787`) con el mismo recorrido que una impresora
+real (pre-vuelo S1, ítems, cierre y conciliación).
+
+```powershell
+# 1) panel del simulador (una sola instancia, la que se ve)
+& C:\Proyectos\GO\SimuladorFiscalGO\simuladorfiscal.exe panel --host 127.0.0.1 --port 8787 --no-browser
+
+# 2) puente: spooler <-TCP:2011- simprint -HTTP-> panel :8787
+.\bin\simprint\simprint.exe -listen 127.0.0.1:2011 -panel http://127.0.0.1:8787
+
+# 3) servidor: printer.transport = tcp, printer.tcp_address = 127.0.0.1:2011
+# 4) factura por curl -> se imprime en el panel
+curl.exe -X POST http://127.0.0.1:8080/v1/invoices -H "Authorization: Bearer CAMBIAR-ESTE-TOKEN" `
+  -H "Content-Type: application/json" -H "Idempotency-Key: pedido-1" `
+  -d '{\"station\":\"CAJA-01\",\"lines\":[\"!   1.000     10.00CAFE\",\"101\"]}'
+```
+
+El agente de estación (`bin\cliente`) se conecta al servidor por gRPC con el
+`.env` (`SPOOLER_SERVER_ADDR=127.0.0.1:5050`, `SPOOLER_TOKEN` y
+`SPOOLER_STATION_ID`); el puente COM de la estación requiere `com0com`.
+
+
 ## 5. Desinstalar
 
 ```powershell

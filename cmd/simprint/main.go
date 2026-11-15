@@ -19,11 +19,14 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log/slog"
 	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -64,12 +67,18 @@ Opciones:
   -rif J-...            RIF del encabezado (por omisión J-12345678-9).
   -serial-id SIM...     Serial del emulador que responde en S1/S5.
   -store "Nombre"       Nombre del punto de venta en el encabezado.
+  -panel <url>          Reenvía cada comando al panel web de SimuladorFiscalGO
+                        (POST /api/command) en vez del motor propio: la factura
+                        se ve en el papel virtual del panel, p. ej.
+                        -panel http://127.0.0.1:8787
+  -brand tfhka          Marca que usa el panel (para -panel).
 
 Controles:
   p + Enter   alterna el sensor de papel (0x01 en S2 y ERROR al imprimir).
   Ctrl+C      cierra y guarda el estado.
 
 Ejemplo con el servidor:
+  simprint -listen 127.0.0.1:2011 -panel http://127.0.0.1:8787
   simprint -listen 127.0.0.1:2011 -escpos-tcp 192.168.1.50:9100
   (server.yaml: printer.transport = tcp, printer.tcp_address = 127.0.0.1:2011)
 `
@@ -90,6 +99,8 @@ func run(args []string) int {
 	rif := fs.String("rif", "J-12345678-9", "RIF del encabezado")
 	serialID := fs.String("serial-id", "SIMTFHKA01", "serial del emulador")
 	store := fs.String("store", "PUNTO DE VENTA SIMULADO", "nombre del punto de venta")
+	panelURL := fs.String("panel", "", "reenvía los comandos al panel web de SimuladorFiscalGO (POST /api/command)")
+	brand := fs.String("brand", "tfhka", "marca del simulador (para -panel)")
 	fs.Usage = func() { fmt.Fprint(os.Stderr, usage) }
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -149,14 +160,23 @@ func run(args []string) int {
 
 	log.Info("simprint iniciado (documento de PRUEBA, no fiscal)",
 		"protocolo_tcp", *listen, "protocolo_com", *serialProto,
-		"termica", printer.describe(), "estado", *statePath)
+		"termica", printer.describe(), "panel", *panelURL, "estado", *statePath)
+
+	// El respondedor de comandos: el panel web de SimuladorFiscalGO si se
+	// indicó -panel (la factura se ve en su papel virtual), si no el motor.
+	responder := func(ctx context.Context, cmd string) string { return engine.Handle(cmd) }
+	if *panelURL != "" {
+		responder = func(ctx context.Context, cmd string) string {
+			return panelForward(ctx, *panelURL, *brand, cmd)
+		}
+	}
 
 	var wg sync.WaitGroup
 	if *listen != "" {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if err := serveTCP(ctx, *listen, engine, log); err != nil {
+			if err := serveTCP(ctx, *listen, responder, log); err != nil {
 				log.Error("escucha de protocolo", "error", err)
 			}
 		}()
@@ -165,7 +185,7 @@ func run(args []string) int {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if err := serveSerial(ctx, *serialProto, engine, log); err != nil {
+			if err := serveSerial(ctx, *serialProto, responder, log); err != nil {
 				log.Error("escucha serie de protocolo", "error", err)
 			}
 		}()
@@ -188,7 +208,7 @@ func run(args []string) int {
 
 // serveTCP atiende el protocolo TFHKA por TCP: un comando por trama (gap de
 // silencio), una respuesta por comando. Múltiples conexiones simultáneas.
-func serveTCP(ctx context.Context, addr string, engine *simprint.Engine, log *slog.Logger) error {
+func serveTCP(ctx context.Context, addr string, responder func(context.Context, string) string, log *slog.Logger) error {
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return fmt.Errorf("escuchar %s: %w", addr, err)
@@ -205,12 +225,12 @@ func serveTCP(ctx context.Context, addr string, engine *simprint.Engine, log *sl
 			}
 			return fmt.Errorf("aceptar: %w", err)
 		}
-		go handleStream(ctx, fiscal.WrapTCP(conn), engine, log, conn.RemoteAddr().String())
+		go handleStream(ctx, fiscal.WrapTCP(conn), responder, log, conn.RemoteAddr().String())
 	}
 }
 
 // handleStream procesa comandos de un stream (TCP o COM) hasta que cierra.
-func handleStream(ctx context.Context, s frame.Stream, engine *simprint.Engine, log *slog.Logger, peer string) {
+func handleStream(ctx context.Context, s frame.Stream, responder func(context.Context, string) string, log *slog.Logger, peer string) {
 	defer s.Close()
 	log.Debug("conexión de protocolo", "peer", peer)
 	for {
@@ -224,7 +244,7 @@ func handleStream(ctx context.Context, s frame.Stream, engine *simprint.Engine, 
 			}
 			return // timeout de silencio entre comandos o cliente cerrado
 		}
-		resp := engine.Handle(string(raw))
+		resp := responder(ctx, string(raw))
 		if err := frame.Write(s, []byte(resp+"\n")); err != nil {
 			return
 		}
@@ -233,7 +253,7 @@ func handleStream(ctx context.Context, s frame.Stream, engine *simprint.Engine, 
 
 // serveSerial escucha el protocolo por un COM real (con com0com, el par
 // virtual). Un solo cliente: el driver de la fiscal.
-func serveSerial(ctx context.Context, name string, engine *simprint.Engine, log *slog.Logger) error {
+func serveSerial(ctx context.Context, name string, responder func(context.Context, string) string, log *slog.Logger) error {
 	port, err := fiscal.OpenSerial(fiscal.SerialConfig{Name: name, BaudRate: 9600, DataBits: 8, Parity: "N", StopBits: "1"})
 	if err != nil {
 		return fmt.Errorf("abrir %s: %w", name, err)
@@ -243,8 +263,37 @@ func serveSerial(ctx context.Context, name string, engine *simprint.Engine, log 
 		<-ctx.Done()
 		_ = port.Close()
 	}()
-	handleStream(ctx, port, engine, log, name)
+	handleStream(ctx, port, responder, log, name)
 	return nil
+}
+
+// panelForward envía un comando al panel web de SimuladorFiscalGO y devuelve
+// la respuesta del simulador, de modo que el spooler imprime en la misma
+// instancia cuyo papel virtual se muestra en el navegador.
+func panelForward(ctx context.Context, baseURL, brand, cmd string) string {
+	url := strings.TrimRight(baseURL, "/") + "/api/command"
+	body, err := json.Marshal(map[string]string{"brand": brand, "command": cmd})
+	if err != nil {
+		return "ERROR|0xEE|panel no disponible"
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return "ERROR|0xEE|panel no disponible"
+	}
+	req.Header.Set("Content-Type", "application/json")
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "ERROR|0xEE|panel no disponible"
+	}
+	defer resp.Body.Close()
+	var out struct {
+		Response string `json:"response"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil || out.Response == "" {
+		return "ERROR|0xEE|panel sin respuesta"
+	}
+	return out.Response
 }
 
 // printer agrupa las salidas configuradas de los documentos cerrados.
