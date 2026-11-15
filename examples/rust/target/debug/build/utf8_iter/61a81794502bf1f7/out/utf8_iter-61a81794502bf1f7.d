@@ -1,0 +1,11 @@
+C:\Proyectos\GO\SpoolerFiscal\examples\rust\target\debug\build\utf8_iter/61a81794502bf1f7\out\utf8_iter-61a81794502bf1f7.d: C:\Users\orcan\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\utf8_iter-1.1.0\src\lib.rs C:\Users\orcan\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\utf8_iter-1.1.0\src\basic.rs C:\Users\orcan\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\utf8_iter-1.1.0\src\handler.rs C:\Users\orcan\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\utf8_iter-1.1.0\src\indices.rs C:\Users\orcan\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\utf8_iter-1.1.0\src\macros.rs C:\Users\orcan\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\utf8_iter-1.1.0\src\report.rs C:\Users\orcan\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\utf8_iter-1.1.0\src\str.rs
+
+C:\Proyectos\GO\SpoolerFiscal\examples\rust\target\debug\build\utf8_iter/61a81794502bf1f7\out\libutf8_iter-61a81794502bf1f7.rmeta: C:\Users\orcan\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\utf8_iter-1.1.0\src\lib.rs C:\Users\orcan\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\utf8_iter-1.1.0\src\basic.rs C:\Users\orcan\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\utf8_iter-1.1.0\src\handler.rs C:\Users\orcan\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\utf8_iter-1.1.0\src\indices.rs C:\Users\orcan\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\utf8_iter-1.1.0\src\macros.rs C:\Users\orcan\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\utf8_iter-1.1.0\src\report.rs C:\Users\orcan\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\utf8_iter-1.1.0\src\str.rs
+
+C:\Users\orcan\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\utf8_iter-1.1.0\src\lib.rs:
+C:\Users\orcan\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\utf8_iter-1.1.0\src\basic.rs:
+C:\Users\orcan\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\utf8_iter-1.1.0\src\handler.rs:
+C:\Users\orcan\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\utf8_iter-1.1.0\src\indices.rs:
+C:\Users\orcan\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\utf8_iter-1.1.0\src\macros.rs:
+C:\Users\orcan\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\utf8_iter-1.1.0\src\report.rs:
+C:\Users\orcan\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\utf8_iter-1.1.0\src\str.rs:

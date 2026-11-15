@@ -1,0 +1,663 @@
+openapi: 3.0.3
+info:
+  title: Spooler Fiscal — API REST
+  version: "1.0.0"
+  description: |
+    API HTTP/JSON del spooler fiscal central. Comparte con las estaciones COM la
+    misma cola serializada, el turno exclusivo por factura y el correlativo
+    único: cualquier sistema (ecommerce, ERP web, CRM) puede emitir sin hablar
+    gRPC. El servidor no interpreta la fiscalidad: recibe las líneas del
+    protocolo TFHKA ya formateadas y las ejecuta en orden.
+
+    Autenticación: `Authorization: Bearer <token>` (el mismo token de las
+    estaciones). `GET /v1/health` no requiere token.
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+servers:
+  - url: http://127.0.0.1:8080
+    description: Instalación local (http.listen del server.yaml)
+security:
+  - bearerAuth: []
+tags:
+  - name: salud
+  - name: estado
+  - name: documentos
+  - name: emisión
+  - name: trabajos
+paths:
+  /v1/health:
+    get:
+      tags: [salud]
+      summary: Estado del servicio sin autenticación
+      security: []
+      responses:
+        "200":
+          description: Servicio vivo
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: {type: string, example: ok}
+                  version: {type: string, example: "1.0.0"}
+                  protocol_version: {type: integer, example: 1}
+                  driver: {type: string, example: tfhka}
+                  uptime_seconds: {type: integer, format: int64}
+                  server_time_unix: {type: integer, format: int64}
+  /v1/status:
+    get:
+      tags: [estado]
+      summary: Estado de impresora, cola, documento abierto y contadores
+      parameters:
+        - name: probe
+          in: query
+          required: false
+          description: Fuerza una consulta a la impresora en lugar de usar el estado cacheado.
+          schema: {type: boolean, default: false}
+      responses:
+        "200":
+          description: Estado actual
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Status"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+  /v1/printer:
+    get:
+      tags: [estado]
+      summary: Modelo, serial, RIF, firmware y memoria fiscal
+      responses:
+        "200":
+          description: Datos de la impresora
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  brand: {type: string}
+                  model: {type: string}
+                  serial: {type: string}
+                  firmware: {type: string}
+                  fiscal_rif: {type: string}
+                  port: {type: string}
+                  fiscal_memory_total_mb: {type: number, format: double}
+                  fiscal_memory_free_mb: {type: number, format: double}
+                  last_invoice_number: {type: integer, format: int64}
+                  last_credit_note: {type: integer, format: int64}
+                  last_debit_note: {type: integer, format: int64}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "503": {$ref: "#/components/responses/PrinterUnavailable"}
+  /v1/documents:
+    get:
+      tags: [documentos]
+      summary: Historial fiscal registrado (más reciente primero)
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema: {type: integer, minimum: 1, maximum: 500, default: 50}
+      responses:
+        "200":
+          description: Documentos
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count: {type: integer}
+                  documents:
+                    type: array
+                    items: {$ref: "#/components/schemas/Document"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+  /v1/commands:
+    post:
+      tags: [emisión]
+      summary: Ejecuta un comando fiscal suelto
+      description: |
+        Equivalente REST de `SendCommand`. La sesión es implícita
+        (`api:<station>`). Útil para sondas, reportes X/Z o integraciones que ya
+        generan el protocolo. Para una factura completa use `/v1/invoices`.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/CommandRequest"}
+      responses:
+        "200":
+          description: Comando ejecutado
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CommandResponse"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "429": {$ref: "#/components/responses/QueueFull"}
+        "504": {$ref: "#/components/responses/Timeout"}
+  /v1/invoices:
+    post:
+      tags: [emisión]
+      summary: Emite una factura completa de forma atómica
+      description: |
+        Recibe las líneas TFHKA ya formateadas (primera línea abre la factura,
+        última la cierra con `101`). El spooler las ejecuta en orden bajo el
+        turno exclusivo: ninguna otra estación puede intercalar una factura.
+        La validación es estructural; el contenido fiscal lo define quien arma
+        las líneas.
+
+        Envíe `Idempotency-Key`: un reintento devuelve la respuesta original y
+        **no** vuelve a imprimir. Si la factura quedó pausada en la cola (papel
+        agotado, impresora caída) el reintento ve el trabajo activo en 202 hasta
+        que el despachador la complete, y entonces repara la respuesta a 201.
+
+        Cada factura es un **trabajo duradero** persistido en la base del
+        spooler (`print_jobs`): si la impresora falla antes de imprimir nada el
+        trabajo queda `paused` y se reanuda solo; si falló a mitad, se aborta
+        con cierre de recuperación (101) y exige re-sometido (502
+        `invoice_aborted` con `job_id`).
+
+        Modo asíncrono: `?async=1` o encabezado `X-Async: true` devuelve 202 con
+        `job_id` de inmediato; consulte `/v1/jobs/{id}` por el resultado.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/AsyncMode"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/InvoiceRequest"}
+            examples:
+              factura:
+                value:
+                  station: ECOM-01
+                  lines: ["!   1.000     10.00CAFE", "101"]
+                  client_ref: pedido-1001
+                  timeout_ms: 30000
+      responses:
+        "201":
+          description: Factura emitida
+          headers:
+            Idempotent-Replay:
+              description: Presente y `true` cuando la respuesta viene de una clave ya usada.
+              schema: {type: string}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/InvoiceResponse"}
+        "202":
+          description: |
+            Aceptado sin esperar la impresión: modo asíncrono (`?async=1`) o
+            reintento con la clave de un trabajo aún activo.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/JobAccepted"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "429": {$ref: "#/components/responses/QueueFull"}
+        "502": {$ref: "#/components/responses/InvoiceAborted"}
+        "503": {$ref: "#/components/responses/PrinterUnavailable"}
+        "504": {$ref: "#/components/responses/Timeout"}
+  /v1/invoices/structured:
+    post:
+      tags: [emisión]
+      summary: Emite una factura desde ítems y totales en JSON
+      description: |
+        Compila los ítems a líneas TFHKA (alícuota general 16 %, reducida 8 %,
+        adicional 30 % o exenta), añade el cierre `101` y ejecuta la factura con
+        la misma ruta atómica e idempotente que `/v1/invoices`.
+
+        Los `unit_price` se interpretan **con IVA incluido**, como los maneja la
+        TFHKA. Si envía `totals`, se valida contra lo calculado (tolerancia de un
+        centavo) y una discrepancia responde 400 `totals_mismatch`: así no se
+        imprime una factura con totales incoherentes.
+
+        No envía datos de cliente ni formas de pago; para eso use
+        `/v1/commands` con los comandos del protocolo.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/AsyncMode"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/StructuredInvoiceRequest"}
+            examples:
+              dosItems:
+                value:
+                  station: ECOM-01
+                  client_ref: pedido-1001
+                  items:
+                    - {description: CAFE, quantity: 1, unit_price: 10.00, tax: general}
+                    - {description: PAN, quantity: 2, unit_price: 5.00, tax: reduced}
+                  totals: {subtotal: 17.88, tax: 2.12, total: 20.00}
+      responses:
+        "201":
+          description: Factura emitida
+          headers:
+            Idempotent-Replay:
+              description: Presente y `true` cuando la respuesta viene de una clave ya usada.
+              schema: {type: string}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/StructuredInvoiceResponse"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "429": {$ref: "#/components/responses/QueueFull"}
+        "502": {$ref: "#/components/responses/InvoiceAborted"}
+        "503": {$ref: "#/components/responses/PrinterUnavailable"}
+        "504": {$ref: "#/components/responses/Timeout"}
+  /v1/jobs:
+    get:
+      tags: [trabajos]
+      summary: Cola duradera de facturas REST (más reciente primero)
+      description: |
+        Cada factura REST es un trabajo persistido. Use este listado para
+        conciliar sus pedidos con lo impreso: `paused` significa que se
+        reanudará solo cuando la impresora vuelva; `aborted` exige re-someter
+        la factura (nunca se reimprime a mitad).
+      parameters:
+        - name: status
+          in: query
+          required: false
+          description: Filtra por estado del trabajo.
+          schema: {type: string, enum: [queued, printing, paused, aborted, done, canceled]}
+        - name: limit
+          in: query
+          required: false
+          schema: {type: integer, minimum: 1, maximum: 200, default: 50}
+      responses:
+        "200":
+          description: Trabajos
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count: {type: integer}
+                  jobs:
+                    type: array
+                    items: {$ref: "#/components/schemas/JobSummary"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+  /v1/jobs/{id}:
+    get:
+      tags: [trabajos]
+      summary: Detalle y resultado de un trabajo
+      description: |
+        `result` contiene la respuesta completa de la factura (el mismo cuerpo
+        del 201) cuando el trabajo terminó `done`. Para un trabajo `paused`
+        no hay resultado aún: reintentar la factura original con su
+        Idempotency-Key repara la respuesta cuando se complete.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string}
+          example: job_9af1c2ab34de
+      responses:
+        "200":
+          description: Trabajo
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/JobDetail"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: Token compartido del spooler (`token` del server.yaml o `SPOOLER_TOKEN`).
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description: |
+        Clave única del cliente (máx. 128 caracteres). Obligatoria en la práctica
+        para reintentos seguros: la misma clave con el mismo cuerpo devuelve la
+        respuesta guardada; con otro cuerpo responde 409.
+      schema: {type: string, maxLength: 128}
+      example: pedido-1001
+    AsyncMode:
+      name: async (query) / X-Async (header)
+      in: header
+      required: false
+      description: |
+        Modo asíncrono: active con `?async=1` en la URL o con el encabezado
+        `X-Async: true`. El servidor acepta la factura (202 con `job_id`) y el
+        despachador la imprime; el cliente consulta `/v1/jobs/{id}`. Sin modo
+        asíncrono la petición espera la impresión completa.
+      schema: {type: boolean, default: false}
+  responses:
+    BadRequest:
+      description: Petición inválida
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/Error"}
+    Unauthorized:
+      description: Token ausente o inválido
+      headers:
+        WWW-Authenticate:
+          schema: {type: string}
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/Error"}
+    Forbidden:
+      description: Estación fuera de `allowed_stations`
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/Error"}
+    Conflict:
+      description: |
+        `printer_blocked` (papel agotado, memoria llena o error fiscal) o
+        `idempotency_conflict` (clave usada con otro cuerpo).
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/Error"}
+    QueueFull:
+      description: Cola llena (`queue_full`); reintente con espera
+      headers:
+        Retry-After:
+          schema: {type: integer, example: 2}
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/Error"}
+    PrinterUnavailable:
+      description: Impresora caída o sin respuesta
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/Error"}
+    Timeout:
+      description: Tiempo de espera agotado en la cola; el comando no se imprimió
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/Error"}
+    InvoiceAborted:
+      description: |
+        Factura abortada a mitad (`invoice_aborted`): parte de las líneas llegó
+        a papel, el spooler envió el cierre de recuperación (101) y el trabajo
+        quedó `aborted`. Re-someta la factura completa; con Idempotency-Key el
+        integrador puede registrar el aborto por clave.
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/Error"}
+    NotFound:
+      description: Trabajo no encontrado
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/Error"}
+  schemas:
+    InvoiceRequest:
+      type: object
+      additionalProperties: false
+      required: [station, lines]
+      properties:
+        station:
+          type: string
+          maxLength: 64
+          description: Identificador del sistema emisor; se registra en la auditoría.
+          example: ECOM-01
+        lines:
+          type: array
+          minItems: 2
+          maxItems: 500
+          description: Líneas TFHKA; la primera abre la factura y la última debe ser `101`.
+          items: {type: string, maxLength: 1024}
+          example: ["!   1.000     10.00CAFE", "101"]
+        client_ref:
+          type: string
+          description: Referencia del cliente (pedido, orden, factura interna).
+          example: pedido-1001
+        timeout_ms:
+          type: integer
+          minimum: 0
+          description: Espera máxima por línea; 0 usa `queue.default_timeout_ms`.
+          example: 30000
+    InvoiceResponse:
+      type: object
+      properties:
+        station: {type: string}
+        session: {type: string, example: "api:ECOM-01"}
+        order_ref:
+          type: string
+          description: client_ref original del pedido (o la Idempotency-Key), sin el sufijo #índice de cada línea.
+          example: pedido-1001
+        completed: {type: boolean}
+        job_id:
+          type: string
+          description: Identificador del trabajo duradero asociado; consulte /v1/jobs/{id}.
+          example: job_9af1c2ab34de
+        invoice_number: {type: integer, format: int64}
+        document_type: {type: string, example: invoice}
+        sequence: {type: integer, format: int64}
+        issued_at: {type: string, format: date-time}
+        duplicate: {type: boolean}
+        elapsed_ms: {type: integer, format: int64}
+        lines:
+          type: array
+          items: {$ref: "#/components/schemas/LineOutcome"}
+        document: {$ref: "#/components/schemas/Document"}
+    LineOutcome:
+      type: object
+      properties:
+        index: {type: integer}
+        response: {type: string, description: Respuesta cruda de la impresora}
+        sequence: {type: integer, format: int64}
+        queue_wait_ms: {type: integer, format: int64}
+        latency_ms: {type: integer, format: int64}
+    CommandRequest:
+      type: object
+      additionalProperties: false
+      required: [station]
+      properties:
+        station: {type: string, maxLength: 64, example: ERP-01}
+        command: {type: string, description: Comando ASCII (sin CR), ejemplo S1}
+        command_base64: {type: string, description: Alternativa binaria a `command`}
+        client_ref: {type: string}
+        timeout_ms: {type: integer, minimum: 0}
+    CommandResponse:
+      type: object
+      properties:
+        station: {type: string}
+        session: {type: string}
+        response: {type: string}
+        sequence: {type: integer, format: int64}
+        queue_wait_ms: {type: integer, format: int64}
+        latency_ms: {type: integer, format: int64}
+        status: {$ref: "#/components/schemas/PrinterStatus"}
+        document: {$ref: "#/components/schemas/Document"}
+    PrinterStatus:
+      type: object
+      properties:
+        online: {type: boolean}
+        status_byte: {type: integer}
+        error_byte: {type: integer}
+        status_text: {type: string}
+        error_text: {type: string}
+        paper_out: {type: boolean}
+        fiscal_memory_full: {type: boolean}
+        fiscal_memory_almost_full: {type: boolean}
+        last_error: {type: string}
+        raw: {type: string}
+        checked_at_unix: {type: integer, format: int64}
+    Status:
+      type: object
+      properties:
+        printer: {$ref: "#/components/schemas/PrinterStatus"}
+        online: {type: boolean}
+        blocked: {type: boolean}
+        blocked_reason: {type: string}
+        queue_depth: {type: integer}
+        document_open: {type: boolean}
+        document_owner: {type: string}
+        documents_issued: {type: integer, format: int64}
+        commands_total: {type: integer, format: int64}
+        commands_failed: {type: integer, format: int64}
+        duplicates_detected: {type: integer, format: int64}
+        avg_latency_ms: {type: number, format: double}
+        max_latency_ms: {type: number, format: double}
+        uptime_seconds: {type: integer, format: int64}
+        last_sequence: {type: integer, format: int64}
+        history_count: {type: integer, format: int64}
+        last_invoice_number: {type: integer, format: int64}
+        last_document: {$ref: "#/components/schemas/Document"}
+    Document:
+      type: object
+      properties:
+        sequence: {type: integer, format: int64}
+        type: {type: string, example: invoice}
+        number: {type: integer, format: int64}
+        station: {type: string}
+        session: {type: string}
+        issued_at: {type: string, format: date-time}
+        response_text: {type: string}
+        duplicate: {type: boolean}
+        client_ref: {type: string}
+        request_sha256: {type: string}
+        response_sha256: {type: string}
+    StructuredInvoiceRequest:
+      type: object
+      additionalProperties: false
+      required: [station, items]
+      properties:
+        station: {type: string, maxLength: 64, example: ECOM-01}
+        client_ref: {type: string, example: pedido-1001}
+        timeout_ms: {type: integer, minimum: 0}
+        items:
+          type: array
+          minItems: 1
+          maxItems: 500
+          items: {$ref: "#/components/schemas/InvoiceItem"}
+        totals:
+          $ref: "#/components/schemas/InvoiceTotals"
+    InvoiceItem:
+      type: object
+      additionalProperties: false
+      required: [description, quantity, unit_price]
+      properties:
+        description:
+          type: string
+          maxLength: 40
+          description: ASCII imprimible, sin `|` ni saltos de línea.
+          example: CAFE
+        quantity:
+          type: number
+          minimum: 0.001
+          maximum: 9999.999
+          description: Hasta tres decimales.
+          example: 1
+        unit_price:
+          type: number
+          minimum: 0
+          maximum: 9999999.99
+          description: Precio unitario con IVA incluido.
+          example: 10
+        tax:
+          type: string
+          enum: [general, reduced, additional, exempt]
+          default: general
+          description: general 16 %, reduced 8 %, additional 30 %, exempt 0 %.
+    InvoiceTotals:
+      type: object
+      additionalProperties: false
+      properties:
+        subtotal: {type: number, example: 17.88}
+        tax: {type: number, example: 2.12}
+        total: {type: number, example: 20}
+      description: |
+        Opcional. Si se envía, `total` es obligatorio y se compara con el
+        calculado; `subtotal` y `tax` se comparan sólo si son mayores que cero.
+    StructuredInvoiceResponse:
+      allOf:
+        - $ref: "#/components/schemas/InvoiceResponse"
+        - type: object
+          properties:
+            compiled_lines:
+              type: array
+              description: Líneas TFHKA generadas, incluido el cierre `101`.
+              items: {type: string}
+            totals: {$ref: "#/components/schemas/InvoiceTotals"}
+    JobAccepted:
+      type: object
+      description: Respuesta 202 del modo asíncrono o de un reintento con trabajo activo.
+      properties:
+        job_id: {type: string, example: job_9af1c2ab34de}
+        status:
+          type: string
+          enum: [queued, printing, paused]
+          description: Estado del trabajo en el momento de la consulta.
+        station: {type: string, example: ECOM-01}
+        lines: {type: integer, description: Cantidad de líneas fiscales del trabajo.}
+    JobSummary:
+      type: object
+      properties:
+        job_id: {type: string}
+        station: {type: string}
+        status:
+          type: string
+          enum: [queued, printing, paused, aborted, done, canceled]
+          description: |
+            queued: aceptado; printing: en ejecución; paused: detenido por un
+            impedimento transitorio (papel, offline) y reanudable; aborted:
+            parcialmente impreso, exige re-sometido; done: completo.
+        cursor:
+          type: integer
+          description: Líneas ya impresas (avance dentro de la factura).
+        lines: {type: integer}
+        attempts: {type: integer}
+        last_error: {type: string}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    JobDetail:
+      allOf:
+        - $ref: "#/components/schemas/JobSummary"
+        - type: object
+          properties:
+            client_ref: {type: string}
+            lines_raw:
+              type: array
+              description: Líneas TFHKA del trabajo tal como fueron enviadas.
+              items: {type: string}
+            result:
+              type: object
+              description: Respuesta completa de la factura cuando status = done (cuerpo del 201).
+    Error:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+              enum:
+                - invalid_request
+                - unauthorized
+                - station_not_allowed
+                - idempotency_conflict
+                - totals_mismatch
+                - printer_blocked
+                - printer_unavailable
+                - queue_full
+                - timeout
+                - canceled
+                - shutting_down
+                - body_too_large
+                - unsupported_media_type
+                - printer_error
+                - internal_error
+                - invoice_aborted
+                - not_found
+            message: {type: string}
+            job_id:
+              type: string
+              description: Trabajo duradero asociado al error (factura pausada o abortada).
+            line_index:
+              type: integer
+              description: Línea que falló cuando el error ocurrió a mitad de factura.
+            document_open: {type: boolean}
+            document_owner: {type: string}

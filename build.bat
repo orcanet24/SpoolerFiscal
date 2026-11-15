@@ -1,0 +1,77 @@
+@echo off
+setlocal
+
+set "ROOT=%~dp0"
+set "BIN=%ROOT%bin"
+set "CLIENTE=%BIN%\cliente"
+set "SERVER=%BIN%\server"
+
+where go >nul 2>nul
+if errorlevel 1 (
+    echo ERROR: Go no esta instalado o no esta disponible en PATH.
+    exit /b 1
+)
+
+if not exist "%CLIENTE%\configs" mkdir "%CLIENTE%\configs"
+if errorlevel 1 goto :error
+if not exist "%SERVER%\configs" mkdir "%SERVER%\configs"
+if errorlevel 1 goto :error
+
+if not exist "%CLIENTE%\configs\agent.yaml" copy "%ROOT%configs\agent.yaml" "%CLIENTE%\configs\agent.yaml" >nul
+if errorlevel 1 goto :error
+if not exist "%SERVER%\configs\server.yaml" copy "%ROOT%configs\server.yaml" "%SERVER%\configs\server.yaml" >nul
+if errorlevel 1 goto :error
+
+if not exist "%CLIENTE%\.env" (
+    >"%CLIENTE%\.env" echo # Ajuste estos valores para esta estacion.
+    >>"%CLIENTE%\.env" echo SPOOLER_TOKEN=CAMBIAR-ESTE-TOKEN
+    >>"%CLIENTE%\.env" echo SPOOLER_STATION_ID=CAJA-01
+    >>"%CLIENTE%\.env" echo SPOOLER_SERVER_ADDR=192.168.1.10:5050
+    >>"%CLIENTE%\.env" echo SPOOLER_VIRTUAL_COM=COM4
+)
+if errorlevel 1 goto :error
+
+if not exist "%SERVER%\.env" (
+    >"%SERVER%\.env" echo # Ajuste estos valores para el servidor fiscal.
+    >>"%SERVER%\.env" echo SPOOLER_TOKEN=CAMBIAR-ESTE-TOKEN
+    >>"%SERVER%\.env" echo SPOOLER_LISTEN=0.0.0.0:5050
+    >>"%SERVER%\.env" echo SPOOLER_PRINTER_PORT=COM1
+)
+if errorlevel 1 goto :error
+
+set "GOOS=windows"
+set "GOARCH=amd64"
+set "CGO_ENABLED=0"
+
+echo Compilando cliente...
+pushd "%ROOT%"
+go build -trimpath -ldflags "-s -w" -o "%CLIENTE%\cliente.exe" .\cmd\agent
+if errorlevel 1 (
+    popd
+    goto :error
+)
+
+echo Compilando servidor...
+go build -trimpath -ldflags "-s -w" -o "%SERVER%\server.exe" .\cmd\server
+if errorlevel 1 (
+    popd
+    goto :error
+)
+popd
+
+echo.
+echo Compilacion completada:
+echo   Cliente:  %CLIENTE%\cliente.exe
+echo   Config:   %CLIENTE%\configs\agent.yaml
+echo   Entorno:  %CLIENTE%\.env
+echo   Servidor: %SERVER%\server.exe
+echo   Config:   %SERVER%\configs\server.yaml
+echo   Entorno:  %SERVER%\.env
+echo.
+echo Revise y personalice los archivos .env antes de ejecutar.
+exit /b 0
+
+:error
+echo.
+echo ERROR: No se pudo preparar o compilar el proyecto.
+exit /b 1

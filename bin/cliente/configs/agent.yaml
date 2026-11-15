@@ -1,0 +1,48 @@
+# Configuración del Agente de Estación
+# Cada PC con Profit Plus tiene su propio station_id y su par COM de com0com.
+
+# Identificador único y estable de la estación (aparece en la auditoría).
+station_id: CAJA-01
+
+server:
+  address: 192.168.1.10:5050   # IP del servidor con la impresora fiscal
+  token: CAMBIAR-ESTE-TOKEN    # debe coincidir con el del servidor
+  dial_timeout_ms: 3000
+  request_timeout_ms: 30000
+  tls:
+    enabled: false
+    ca_file: ""
+    cert_file: ""
+    key_file: ""
+
+# Extremo del par com0com que abre el agente. Profit Plus usa el otro extremo
+# (por ejemplo COM3). Los parámetros deben coincidir con los de la impresora.
+virtual_com:
+  name: COM4
+  baud_rate: 9600
+  data_bits: 8
+  parity: none
+  stop_bits: "1"
+  flow_control: none
+
+bridge:
+  read_gap_ms: 30              # silencio que cierra un comando de Profit Plus
+  response_timeout_ms: 15000
+  max_frame_bytes: 16384
+  write_settle_ms: 0
+  offline_response_hex: ""     # vacío = Profit Plus ve timeout (no se inventan respuestas)
+  reopen_delay_ms: 1000
+  reopen_max_delay_ms: 30000
+  local_queue_size: 16         # tramas en cola mientras el servidor no responde
+  queue_frame_timeout_ms: 30000
+  max_send_backoff_ms: 2000
+  log_hex_payloads: false      # true = registra comandos/respuestas en hexadecimal
+
+logging:
+  level: info
+  file: logs/agent.log
+  console: true                # al correr como servicio conviene false
+  max_size_mb: 20
+  max_backups: 10
+  max_age_days: 30
+  compress: true

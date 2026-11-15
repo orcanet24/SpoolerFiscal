@@ -1,0 +1,10 @@
+C:\Proyectos\GO\SpoolerFiscal\examples\rust\target\debug\build\zerovec-derive/ba5a318b7c82539d\out\zerovec_derive-ba5a318b7c82539d.d: C:\Users\orcan\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\zerovec-derive-0.11.7\src\lib.rs C:\Users\orcan\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\zerovec-derive-0.11.7\src\make_ule.rs C:\Users\orcan\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\zerovec-derive-0.11.7\src\make_varule.rs C:\Users\orcan\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\zerovec-derive-0.11.7\src\ule.rs C:\Users\orcan\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\zerovec-derive-0.11.7\src\utils.rs C:\Users\orcan\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\zerovec-derive-0.11.7\src\varule.rs
+
+C:\Proyectos\GO\SpoolerFiscal\examples\rust\target\debug\build\zerovec-derive/ba5a318b7c82539d\out\zerovec_derive-ba5a318b7c82539d.dll: C:\Users\orcan\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\zerovec-derive-0.11.7\src\lib.rs C:\Users\orcan\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\zerovec-derive-0.11.7\src\make_ule.rs C:\Users\orcan\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\zerovec-derive-0.11.7\src\make_varule.rs C:\Users\orcan\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\zerovec-derive-0.11.7\src\ule.rs C:\Users\orcan\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\zerovec-derive-0.11.7\src\utils.rs C:\Users\orcan\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\zerovec-derive-0.11.7\src\varule.rs
+
+C:\Users\orcan\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\zerovec-derive-0.11.7\src\lib.rs:
+C:\Users\orcan\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\zerovec-derive-0.11.7\src\make_ule.rs:
+C:\Users\orcan\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\zerovec-derive-0.11.7\src\make_varule.rs:
+C:\Users\orcan\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\zerovec-derive-0.11.7\src\ule.rs:
+C:\Users\orcan\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\zerovec-derive-0.11.7\src\utils.rs:
+C:\Users\orcan\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\zerovec-derive-0.11.7\src\varule.rs:

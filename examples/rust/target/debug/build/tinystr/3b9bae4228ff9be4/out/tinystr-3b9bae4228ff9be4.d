@@ -1,0 +1,12 @@
+C:\Proyectos\GO\SpoolerFiscal\examples\rust\target\debug\build\tinystr/3b9bae4228ff9be4\out\tinystr-3b9bae4228ff9be4.d: C:\Users\orcan\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tinystr-0.8.5\src\lib.rs C:\Users\orcan\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tinystr-0.8.5\src\macros.rs C:\Users\orcan\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tinystr-0.8.5\src\ascii.rs C:\Users\orcan\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tinystr-0.8.5\src\asciibyte.rs C:\Users\orcan\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tinystr-0.8.5\src\error.rs C:\Users\orcan\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tinystr-0.8.5\src\int_ops.rs C:\Users\orcan\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tinystr-0.8.5\src\unvalidated.rs C:\Users\orcan\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tinystr-0.8.5\src\ule.rs
+
+C:\Proyectos\GO\SpoolerFiscal\examples\rust\target\debug\build\tinystr/3b9bae4228ff9be4\out\libtinystr-3b9bae4228ff9be4.rmeta: C:\Users\orcan\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tinystr-0.8.5\src\lib.rs C:\Users\orcan\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tinystr-0.8.5\src\macros.rs C:\Users\orcan\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tinystr-0.8.5\src\ascii.rs C:\Users\orcan\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tinystr-0.8.5\src\asciibyte.rs C:\Users\orcan\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tinystr-0.8.5\src\error.rs C:\Users\orcan\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tinystr-0.8.5\src\int_ops.rs C:\Users\orcan\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tinystr-0.8.5\src\unvalidated.rs C:\Users\orcan\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tinystr-0.8.5\src\ule.rs
+
+C:\Users\orcan\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tinystr-0.8.5\src\lib.rs:
+C:\Users\orcan\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tinystr-0.8.5\src\macros.rs:
+C:\Users\orcan\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tinystr-0.8.5\src\ascii.rs:
+C:\Users\orcan\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tinystr-0.8.5\src\asciibyte.rs:
+C:\Users\orcan\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tinystr-0.8.5\src\error.rs:
+C:\Users\orcan\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tinystr-0.8.5\src\int_ops.rs:
+C:\Users\orcan\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tinystr-0.8.5\src\unvalidated.rs:
+C:\Users\orcan\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tinystr-0.8.5\src\ule.rs:

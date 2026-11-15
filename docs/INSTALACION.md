@@ -1,0 +1,172 @@
+# Manual de instalación
+
+Arquitectura: **una PC servidor** con la impresora fiscal conectada y **una PC por
+estación** con Profit Plus. Todas en la misma red.
+
+## 0. Requisitos
+
+- Windows 10/11 o Server 2019/2022, x64.
+- Go 1.24 o superior **sólo en la máquina de compilación** (los ejecutables no lo
+  necesitan).
+- Puerto serie físico para la impresora (o adaptador USB-serie).
+- Firewall: el puerto gRPC del servidor (5050 por omisión) accesible desde las
+  estaciones. Si usa la API REST para ecommerce/ERP/CRM, abra también el 8080.
+- Permisos de administrador para instalar servicios y com0com.
+
+## 1. Compilar
+
+```powershell
+cd C:\Proyectos\GO\SpoolerFiscal
+.\scripts\build.ps1
+```
+
+Genera `bin\server.exe` y `bin\agent.exe`. También puede compilar a mano:
+
+```powershell
+go build -o bin\server.exe .\cmd\server
+go build -o bin\agent.exe   .\cmd\agent
+```
+
+## 2. Servidor (PC con la impresora)
+
+1. Copie a la PC servidor: `bin\server.exe`, `configs\server.yaml` y una carpeta
+   `data\` escribible. Estructura sugerida: `C:\SpoolerFiscal\`.
+2. Edite `configs\server.yaml`:
+   - `listen`: `0.0.0.0:5050`.
+   - `token`: un secreto largo y único (o use la variable `SPOOLER_TOKEN`).
+   - `printer.port.name`: el COM real de la impresora (ej. `COM1`).
+   - `printer.port.baud_rate`: 9600 o 115200 según la impresora.
+   - `allowed_stations`: opcional, lista de estaciones autorizadas.
+3. Pruebe en consola antes de instalar:
+
+   ```powershell
+   .\bin\server.exe -console -config .\configs\server.yaml
+   ```
+
+   Debe registrar `spooler fiscal escuchando` y el driver configurado.
+4. Instale el servicio (inicio automático + reinicio ante fallos):
+
+   ```powershell
+   .\scripts\install-server.ps1 -Root C:\SpoolerFiscal
+   ```
+
+   Equivalente manual:
+
+   ```cmd
+   sc create SpoolerFiscalServer binPath= "C:\SpoolerFiscal\bin\server.exe -config C:\SpoolerFiscal\configs\server.yaml" start= auto
+   sc start SpoolerFiscalServer
+   ```
+
+5. Abra el puerto en el firewall:
+
+   ```powershell
+   New-NetFirewallRule -DisplayName "Spooler Fiscal gRPC" -Direction Inbound -Protocol TCP -LocalPort 5050 -Action Allow
+   # Sólo si habilitó http.enabled para ecommerce/ERP/CRM:
+   New-NetFirewallRule -DisplayName "Spooler Fiscal REST" -Direction Inbound -Protocol TCP -LocalPort 8080 -Action Allow
+   ```
+
+   La REST comparte el token de las estaciones. Si cruza una red no confiable,
+   active `tls.enabled` (sirve HTTPS con el mismo certificado) y no la exponga a
+   Internet.
+
+## 3. Estación (PC con Profit Plus)
+
+### 3.1 Crear el par de puertos virtuales
+
+1. Instale com0com (driver firmado, gratuito): <https://sourceforge.net/projects/com0com/>.
+2. Créelo con el script incluido, en PowerShell **como administrador**:
+
+   ```powershell
+   .\scripts\setup-com0com.ps1 -ProfitPort COM3 -AgentPort COM4
+   ```
+
+   O manualmente:
+
+   ```
+   "C:\Program Files (x86)\com0com\setupc.exe" install PortName=COM3 PortName=COM4
+   ```
+
+3. Verifique en el Administrador de dispositivos que aparecen `COM3` y `COM4`
+   emparejados.
+
+> `COM3` queda para Profit Plus; `COM4` lo abre el agente. Si esos números están
+> ocupados, use otros (por ejemplo `COM11`/`COM12`) y ajuste la configuración.
+
+### 3.2 Configurar el agente
+
+1. Copie a la estación: `bin\agent.exe`, `configs\agent.yaml` y una carpeta
+   `logs\`. Estructura sugerida: `C:\SpoolerFiscal\`.
+2. Edite `configs\agent.yaml`:
+   - `station_id`: único por estación (`CAJA-01`, `CAJA-02`, …). **No lo repita**:
+     es la identidad que queda en la auditoría.
+   - `server.address`: `IP-del-servidor:5050`.
+   - `server.token`: el mismo del servidor.
+   - `virtual_com.name`: `COM4` (el extremo del agente).
+   - `virtual_com`: los mismos parámetros que la impresora (9600 8N1 típico).
+   - `logging.console`: `false` cuando corra como servicio.
+3. Pruebe en consola:
+
+   ```powershell
+   .\bin\agent.exe -console -config .\configs\agent.yaml
+   ```
+
+   Debe mostrar `COM virtual abierto` y `conectado al spooler`.
+4. Instale el servicio:
+
+   ```powershell
+   .\scripts\install-agent.ps1 -Root C:\SpoolerFiscal
+   ```
+
+### 3.3 Apuntar Profit Plus al puerto virtual
+
+Ver [`PROFITPLUS.md`](PROFITPLUS.md). En resumen: impresora fiscal **TFHKA /
+The Factory**, puerto **COM3**, 9600 8N1, sin control de flujo.
+
+## 4. Verificación de extremo a extremo
+
+1. En el servidor, revise `logs\server.log`: debe aparecer `sesión abierta` con el
+   `station_id` al abrir Profit Plus.
+2. Emita una factura de prueba desde Profit Plus.
+3. En el servidor debe aparecer `documento fiscal registrado` con tipo, número y
+   estación; en la estación, `documentos registrados` por el spooler.
+4. En la base: `data\spooler.db`, tabla `documents`.
+5. API REST (si `http.enabled: true`):
+
+   ```bash
+   curl http://127.0.0.1:8080/v1/health
+   curl -H "Authorization: Bearer CAMBIAR-ESTE-TOKEN" http://127.0.0.1:8080/v1/status
+   ```
+
+   Una factura completa desde un sistema externo:
+
+   ```bash
+   curl -X POST http://127.0.0.1:8080/v1/invoices \
+     -H "Authorization: Bearer CAMBIAR-ESTE-TOKEN" \
+     -H "Content-Type: application/json" \
+     -H "Idempotency-Key: pedido-1001" \
+     -d '{"station":"ECOM-01","lines":["!   1.000     10.00CAFE","101"]}'
+   ```
+
+   Detalle en [`API.md`](API.md) y contrato en [`../api/openapi.yaml`](../api/openapi.yaml).
+
+Prueba sin impresora física (laboratorio):
+
+```powershell
+# impresora fiscal emulada (proyecto SimuladorFiscalGO)
+.\simuladorfiscal.exe serve --model tfhka --addr 127.0.0.1:2011
+
+# servidor apuntando al emulador: printer.transport = tcp, tcp_address = 127.0.0.1:2011
+
+# prueba automática contra el emulador
+$env:SPOOLER_E2E_PRINTER_ADDR = "127.0.0.1:2011"
+go test ./internal/e2e -run TestAgainstExternalPrinter -v
+```
+
+## 5. Desinstalar
+
+```powershell
+.\scripts\uninstall.ps1            # ambos servicios
+.\scripts\uninstall.ps1 -Only agent
+```
+
+Los datos (`data\spooler.db`) y los logs no se borran.

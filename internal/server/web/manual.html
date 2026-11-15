@@ -1,0 +1,1274 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Manual del Spooler Fiscal</title>
+<meta name="description" content="Manual de instalación, operación e integración del spooler fiscal: Profit Plus, API REST y ejemplos en curl, PHP, Go, Python, Node.js y Rust.">
+<style>
+  :root{
+    --ink:#141b22; --muted:#5c6874; --line:#dfe3e6;
+    --bg:#f6f5f1; --card:#ffffff; --soft:#eef1ee;
+    --accent:#0b6b53; --accent-dark:#064b3a; --amber:#b45309;
+    --code-bg:#0f172a; --code-ink:#e6edf3; --radius:12px;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font:16px/1.65 system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  a{color:var(--accent); text-decoration:none}
+  a:hover{text-decoration:underline}
+  header.top{
+    background:linear-gradient(120deg,var(--accent-dark),var(--accent) 65%,#12876a);
+    color:#fff; padding:34px 28px 30px; border-bottom:4px solid var(--amber);
+  }
+  header.top .wrap{max-width:1220px;margin:0 auto}
+  header.top .eyebrow{
+    text-transform:uppercase; letter-spacing:.18em; font-size:.72rem;
+    opacity:.85; margin:0 0 8px; font-weight:600;
+  }
+  header.top h1{margin:0; font-size:clamp(1.7rem,3.4vw,2.6rem); line-height:1.15; letter-spacing:-.02em}
+  header.top p{margin:10px 0 0; max-width:70ch; opacity:.92}
+  header.top .chips{margin-top:16px; display:flex; flex-wrap:wrap; gap:8px}
+  header.top .chip{
+    background:rgba(255,255,255,.14); border:1px solid rgba(255,255,255,.25);
+    padding:4px 10px; border-radius:999px; font-size:.8rem;
+  }
+  .layout{max-width:1220px; margin:0 auto; display:grid; grid-template-columns:280px minmax(0,1fr); gap:40px; padding:32px 28px 80px}
+  nav#toc{position:sticky; top:24px; align-self:start; max-height:calc(100vh - 48px); overflow:auto; padding-right:8px}
+  nav#toc .search{
+    width:100%; padding:9px 11px; margin-bottom:14px; border:1px solid var(--line);
+    border-radius:9px; background:#fff; font:inherit; font-size:.9rem; color:var(--ink);
+  }
+  nav#toc .search:focus{outline:2px solid color-mix(in srgb,var(--accent) 35%,transparent); border-color:var(--accent)}
+  nav#toc h2{font-size:.72rem; text-transform:uppercase; letter-spacing:.14em; color:var(--muted); margin:0 0 10px}
+  nav#toc ol{list-style:none; margin:0; padding:0}
+  nav#toc li{margin:2px 0}
+  nav#toc a{
+    display:block; padding:6px 10px; border-radius:8px; color:#33403b;
+    font-size:.92rem; border-left:3px solid transparent;
+  }
+  nav#toc a:hover{background:var(--soft); text-decoration:none}
+  nav#toc a.sub{padding-left:24px; font-size:.85rem; color:var(--muted)}
+  nav#toc a.active{background:#e5efe9; color:var(--accent-dark); border-left-color:var(--accent); font-weight:600}
+  main{min-width:0}
+  section{margin:0 0 46px; scroll-margin-top:20px}
+  section > h2{
+    font-size:1.55rem; letter-spacing:-.015em; margin:0 0 6px;
+    padding-bottom:10px; border-bottom:2px solid var(--line);
+  }
+  section > h3{font-size:1.14rem; margin:30px 0 10px; color:var(--accent-dark)}
+  section > h4{font-size:1rem; margin:22px 0 8px}
+  p{margin:10px 0}
+  ul,ol{margin:10px 0 10px 22px; padding:0}
+  li{margin:5px 0}
+  code{
+    font-family:"Cascadia Code",Consolas,"SF Mono",Menlo,monospace;
+    background:#e9ece9; padding:1px 5px; border-radius:5px; font-size:.88em;
+  }
+  pre{
+    position:relative; background:var(--code-bg); color:var(--code-ink);
+    padding:18px 18px 16px; border-radius:var(--radius); overflow:auto;
+    font-size:.86rem; line-height:1.55; margin:14px 0;
+  }
+  pre code{background:none; padding:0; color:inherit; font-size:1em}
+  pre .lang{
+    position:absolute; top:0; right:0; padding:3px 10px; font-size:.68rem;
+    text-transform:uppercase; letter-spacing:.1em; color:#9fb0c0;
+    background:#182234; border-radius:0 var(--radius) 0 8px;
+  }
+  pre button.copy{
+    position:absolute; top:8px; right:8px; border:1px solid #3b4a5f; background:#1b2536;
+    color:#c7d3df; border-radius:7px; padding:3px 8px; font-size:.7rem; cursor:pointer;
+  }
+  pre button.copy:hover{background:#25344a}
+  pre .lang + button.copy{top:30px}
+  table{width:100%; border-collapse:collapse; margin:14px 0; font-size:.92rem; background:#fff}
+  th,td{border:1px solid var(--line); padding:9px 11px; text-align:left; vertical-align:top}
+  th{background:#f0f3f0; font-weight:600}
+  tbody tr:nth-child(even){background:#fbfbf9}
+  .note,.warn,.tip{
+    border-left:4px solid var(--accent); background:#fff; padding:12px 16px;
+    border-radius:0 10px 10px 0; margin:16px 0; box-shadow:0 1px 0 rgba(0,0,0,.03);
+  }
+  .note strong,.warn strong,.tip strong{display:block; margin-bottom:2px}
+  .warn{border-left-color:var(--amber); background:#fffaf3}
+  .tip{border-left-color:#2563eb; background:#f5f8ff}
+  .grid{display:grid; gap:14px; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); margin:16px 0}
+  .card{background:var(--card); border:1px solid var(--line); border-radius:var(--radius); padding:16px 18px}
+  .card h4{margin:0 0 6px; font-size:.98rem; color:var(--accent-dark)}
+  .card p{margin:0; font-size:.9rem; color:var(--muted)}
+  .steps{counter-reset:step; list-style:none; margin:14px 0; padding:0}
+  .steps li{
+    counter-increment:step; position:relative; padding:0 0 14px 42px; margin:0;
+  }
+  .steps li:before{
+    content:counter(step); position:absolute; left:0; top:0; width:28px; height:28px;
+    border-radius:50%; background:var(--accent); color:#fff; display:grid; place-items:center;
+    font-size:.85rem; font-weight:700;
+  }
+  .steps li strong{display:block}
+  .diagram{
+    background:#0f1b17; color:#cfe6dc; border-radius:var(--radius); padding:18px;
+    font-size:.78rem; line-height:1.35; overflow:auto;
+  }
+  .kbd{
+    font-family:inherit; background:#eef1ee; border:1px solid #cfd6d1; border-bottom-width:2px;
+    border-radius:6px; padding:1px 6px; font-size:.85em;
+  }
+  footer{
+    border-top:1px solid var(--line); background:#fff; padding:26px 28px;
+    color:var(--muted); font-size:.85rem;
+  }
+  footer .wrap{max-width:1220px;margin:0 auto; display:flex; flex-wrap:wrap; gap:12px; justify-content:space-between}
+  .badge{display:inline-block; font-size:.72rem; padding:2px 8px; border-radius:999px; background:#e5efe9; color:var(--accent-dark); font-weight:600}
+  .badge.get{background:#e8f0fb; color:#1d4ed8}
+  .badge.post{background:#e9f7ee; color:#047857}
+  @media (max-width:920px){
+    .layout{grid-template-columns:1fr; gap:24px; padding-top:22px}
+    nav#toc{position:static; max-height:none; border:1px solid var(--line); background:#fff; border-radius:var(--radius); padding:14px}
+    nav#toc ol{columns:2; column-gap:16px}
+  }
+  @media (max-width:560px){ nav#toc ol{columns:1} }
+  @media print{
+    header.top{background:#fff;color:#000;border-bottom:2px solid #000}
+    nav#toc,pre button.copy,pre .lang{display:none}
+    .layout{display:block; padding:0}
+    pre{white-space:pre-wrap; word-break:break-word; background:#f4f4f4; color:#000; border:1px solid #ccc}
+  }
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <p class="eyebrow">Manual de usuario · versión 1.0</p>
+    <h1>Spooler Fiscal</h1>
+    <p>Varias cajas con Profit Plus y una sola impresora fiscal, con un correlativo único, auditoría central y una API REST para ecommerce, ERP o CRM. Todo en Go, sin dependencias de runtime.</p>
+    <div class="chips">
+      <span class="chip">Windows 10/11 · Server 2019/2022</span>
+      <span class="chip">Profit Plus por COM virtual</span>
+      <span class="chip">API REST + OpenAPI</span>
+      <span class="chip">SQLite embebido</span>
+    </div>
+  </div>
+</header>
+
+<div class="layout">
+<nav id="toc" aria-label="Índice del manual">
+  <input class="search" id="tocSearch" type="search" placeholder="Buscar en el manual…" aria-label="Buscar secciones">
+  <h2>Contenido</h2>
+  <ol id="tocList">
+    <li><a href="#que-es">1. Qué es y qué resuelve</a></li>
+    <li><a href="#como-funciona">2. Cómo funciona</a></li>
+    <li><a href="#puesta-en-marcha">3. Puesta en marcha</a></li>
+    <li><a href="#api" class="sub">3.1 API REST</a></li>
+    <li><a href="#factura-items" class="sub">3.2 Factura desde ítems</a></li>
+    <li><a href="#ejemplos">4. Ejemplos por lenguaje</a></li>
+    <li><a href="#ej-curl" class="sub">cURL / PowerShell</a></li>
+    <li><a href="#ej-php" class="sub">PHP</a></li>
+    <li><a href="#ej-go" class="sub">Go</a></li>
+    <li><a href="#ej-python" class="sub">Python</a></li>
+    <li><a href="#ej-node" class="sub">Node.js</a></li>
+    <li><a href="#ej-rust" class="sub">Rust</a></li>
+    <li><a href="#operacion">5. Operación diaria</a></li>
+    <li><a href="#seguridad">6. Seguridad</a></li>
+    <li><a href="#problemas">7. Problemas frecuentes</a></li>
+    <li><a href="#faq">8. Preguntas frecuentes</a></li>
+    <li><a href="#referencias">9. Referencias</a></li>
+  </ol>
+</nav>
+
+<main>
+
+<section id="que-es">
+  <h2>1. Qué es y qué resuelve</h2>
+  <p>Una impresora fiscal sólo puede estar conectada a un equipo y sólo puede imprimir un documento a la vez. Cuando varias cajas emiten, aparecen tres problemas clásicos:</p>
+  <ul>
+    <li><strong>Correlativos duplicados:</strong> dos cajas creen que la siguiente factura es la misma.</li>
+    <li><strong>Facturas mezcladas:</strong> los ítems de una caja se imprimen dentro de la factura de otra.</li>
+    <li><strong>Sin auditoría:</strong> nadie sabe qué estación emitió qué documento ni cuándo.</li>
+  </ul>
+  <p>El spooler fiscal es un servicio central que se queda con la impresora. Las estaciones (Profit Plus) ven un puerto COM virtual; el agente de cada estación transporta los bytes al servidor, y el servidor los ejecuta <strong>en orden, uno por uno</strong>, manteniendo el correlativo y el historial en SQLite.</p>
+
+  <div class="grid">
+    <div class="card"><h4>Una cola, un escritor</h4><p>Sólo el servidor escribe en la impresora. Nunca hay dos manos sobre el mismo puerto.</p></div>
+    <div class="card"><h4>Turno por factura</h4><p>La caja que abre una factura conserva el turno hasta cerrarla: nada se intercala.</p></div>
+    <div class="card"><h4>Sin reenvío ciego</h4><p>Si un comando pudo imprimirse, no se reintenta: se evita la doble emisión.</p></div>
+    <div class="card"><h4>API para otros sistemas</h4><p>Ecommerce, ERP web o CRM pueden facturar por HTTP sin hablar COM ni gRPC.</p></div>
+  </div>
+
+  <h3>Qué incluye</h3>
+  <ul>
+    <li><code>server.exe</code>: cola, guardián de estado, SQLite, gRPC para las estaciones y API REST.</li>
+    <li><code>agent.exe</code>: puente entre el COM virtual de cada caja y el servidor.</li>
+    <li>Driver fiscal TFHKA (The Factory HKA, ASCII), aislado para poder añadir otras marcas.</li>
+    <li>Servicios de Windows, scripts de instalación, logs con rotación y manual (este documento).</li>
+    <li>Ejemplos de integración en curl, PHP, Go, Python, Node.js y Rust.</li>
+  </ul>
+</section>
+
+<section id="como-funciona">
+  <h2>2. Cómo funciona</h2>
+
+  <pre class="diagram"><span class="lang">arquitectura</span> Estación 1                        Servidor                        Impresora
+┌───────────────────────┐        ┌────────────────────────┐        ┌──────────────┐
+│ Profit Plus           │        │ server.exe             │        │ TFHKA        │
+│   │ COM3              │        │  ├ cola serializada    │        │ (The Factory)│
+│   ▼                   │        │  ├ turno por factura   │        │              │
+│ com0com (COM3↔COM4)   │        │  ├ correlativo         │        │              │
+│   │                   │  gRPC  │  ├ SQLite auditoría    │ serie  │              │
+│ agent.exe (COM4) ─────┼───────►│  ├ guardián de estado  │───────►│   COM1       │
+└───────────────────────┘        │  └ API REST /v1        │        └──────────────┘
+                                 └───────────▲────────────┘
+                                             │ HTTP
+                                 ecommerce · ERP web · CRM</pre>
+
+  <h3>El recorrido de una factura</h3>
+  <ol class="steps">
+    <li><strong>Profit Plus escribe en COM3.</strong> Cree que habla con una impresora; en realidad habla con un extremo de com0com.</li>
+    <li><strong>El agente lee COM4.</strong> Delimita la trama por silencio (no interpreta el protocolo) y la envía por gRPC al servidor con el token.</li>
+    <li><strong>El servidor encola.</strong> Cada estación tiene su cola; una sola estación tiene el turno en cada momento.</li>
+    <li><strong>Se escribe en la impresora.</strong> El servidor envía el comando, lee la respuesta íntegra y la devuelve a la estación.</li>
+    <li><strong>Se registra.</strong> Si la respuesta es una factura, guarda tipo, número, estación, hashes y latencia. Detecta números repetidos.</li>
+  </ol>
+
+  <h3>Conceptos clave</h3>
+  <table>
+    <thead><tr><th>Concepto</th><th>Qué significa en la práctica</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Estación</strong></td><td>Un equipo con Profit Plus y un agente. Se identifica con <code>station_id</code> (por ejemplo <code>CAJA-01</code>).</td></tr>
+      <tr><td><strong>Turno exclusivo</strong></td><td>La primera línea de ítem abre una factura y retiene la impresora hasta el cierre (<code>101</code>). Las demás cajas esperan.</td></tr>
+      <tr><td><strong>Correlativo</strong></td><td>Lo asigna la impresora; el servidor lo registra y detecta si un número se repite (doble emisión).</td></tr>
+      <tr><td><strong>Guardián</strong></td><td>Si hay papel agotado, memoria fiscal llena o un error fiscal, el servidor rechaza la emisión antes de escribir.</td></tr>
+      <tr><td><strong>Idempotencia</strong></td><td>En REST, una <code>Idempotency-Key</code> repetida devuelve la respuesta guardada sin volver a imprimir.</td></tr>
+      <tr><td><strong>Turno abandonado</strong></td><td>Si una caja muere con una factura abierta, el turno se libera tras <code>document_lock_timeout_ms</code>.</td></tr>
+    </tbody>
+  </table>
+
+  <div class="note"><strong>Importante</strong> El agente no interpreta nada de fiscalidad: transporta bytes. Todo el criterio (turno, correlativo, estado) vive en el servidor, junto a la impresora.</div>
+</section>
+
+<section id="puesta-en-marcha">
+  <h2>3. Puesta en marcha</h2>
+
+  <h3>Requisitos</h3>
+  <ul>
+    <li>Windows 10/11 o Server 2019/2022, 64 bits.</li>
+    <li>Go 1.25 o superior <em>sólo para compilar</em>; los binarios no necesitan Go.</li>
+    <li>Impresora fiscal TFHKA con puerto serie (o adaptador USB-serie).</li>
+    <li>Driver <strong>com0com</strong> en cada estación (par de puertos virtuales).</li>
+    <li>Permisos de administrador para instalar servicios y com0com.</li>
+    <li>Puerto 5050 (gRPC) abierto entre estaciones y servidor; 8080 si usa la API REST.</li>
+  </ul>
+
+  <h3>Compilar</h3>
+  <pre><code>cd C:\Proyectos\GO\SpoolerFiscal
+.\scripts\build.ps1</code><span class="lang">powershell</span></pre>
+  <p>También puede usar <code>build.bat</code> o compilar a mano:</p>
+  <pre><code>go build -trimpath -ldflags "-s -w" -o bin\server.exe .\cmd\server
+go build -trimpath -ldflags "-s -w" -o bin\agent.exe  .\cmd\agent</code><span class="lang">bash</span></pre>
+  <p>Los binarios quedan en <code>bin\</code>. Son autocontenidos: no requieren DLLs ni runtime adicional.</p>
+
+  <h3>3.1 Configurar el servidor</h3>
+  <p>Copie <code>configs\server.yaml</code> junto al binario y ajuste al menos el token y el puerto de la impresora:</p>
+  <pre><code>listen: 0.0.0.0:5050            # gRPC para las estaciones
+token: CAMBIAR-ESTE-TOKEN       # el mismo en todos los agentes
+
+printer:
+  driver: tfhka
+  transport: serial             # serial | tcp (tcp = laboratorio)
+  port:
+    name: COM1
+    baud_rate: 9600
+    data_bits: 8
+    parity: none
+    stop_bits: "1"
+  command_terminator: "\r\n"    # CR+LF: con CR solo la TFHKA no responde
+  response_timeout_ms: 20000
+
+queue:
+  max_pending: 256
+  default_timeout_ms: 30000
+  document_lock_timeout_ms: 120000
+
+http:
+  enabled: true                 # API REST para ecommerce/ERP/CRM
+  listen: 0.0.0.0:8080
+
+database:
+  path: data/spooler.db</code><span class="lang">yaml</span></pre>
+
+  <div class="warn"><strong>Token</strong> Cámbielo en producción. Puede dejarlo fuera del YAML y usar la variable de entorno <code>SPOOLER_TOKEN</code>. El servicio restringe los permisos del archivo al arrancar.</div>
+
+  <h3>3.2 Configurar la estación</h3>
+  <pre><code>station_id: CAJA-01
+server:
+  address: 192.168.1.10:5050
+  token: CAMBIAR-ESTE-TOKEN
+
+virtual_com:
+  name: COM4          # el otro extremo del par com0com
+  baud_rate: 9600
+  data_bits: 8
+  parity: none
+  stop_bits: "1"</code><span class="lang">yaml</span></pre>
+
+  <h3>3.3 Crear el par de puertos virtuales</h3>
+  <p>Instale com0com y cree un par, por ejemplo <code>COM3</code> ↔ <code>COM4</code>. Profit Plus usará <code>COM3</code>; el agente abrirá <code>COM4</code>. El script <code>scripts\setup-com0com.ps1</code> ayuda a crearlo.</p>
+  <div class="tip"><strong>Por qué un par</strong> Profit Plus necesita un puerto COM real del sistema. com0com es un driver existente; el proyecto no implementa emulación de kernel.</div>
+
+  <h3>3.4 Apuntar Profit Plus</h3>
+  <p>En Profit Plus, configure la impresora fiscal como <strong>The Factory</strong>, puerto <code>COM3</code>, 9600 8N1, sin control de flujo. Consulte <code>docs\PROFITPLUS.md</code> para el detalle por versión.</p>
+
+  <h3>3.5 Instalar como servicio</h3>
+  <pre><code>.\bin\server.exe -install -config C:\SpoolerFiscal\configs\server.yaml
+sc start SpoolerFiscalServer
+
+.\bin\agent.exe -install -config C:\SpoolerFiscal\configs\agent.yaml
+sc start SpoolerFiscalAgent</code><span class="lang">powershell</span></pre>
+  <p>Para probar en primer plano, use <code>-console</code>. Para desinstalar: <code>server.exe -uninstall</code> y <code>agent.exe -uninstall</code>.</p>
+
+  <h3>3.6 Verificar</h3>
+  <pre><code>curl http://127.0.0.1:8080/v1/health
+curl -H "Authorization: Bearer CAMBIAR-ESTE-TOKEN" http://127.0.0.1:8080/v1/status</code><span class="lang">bash</span></pre>
+  <p>Debe ver <code>"status":"ok"</code> y <code>"online":true</code>. Emita una factura de prueba desde Profit Plus: en <code>logs\server.log</code> aparecerá <code>documento fiscal registrado</code> con su número.</p>
+
+  <h3>Ayuda desde los binarios</h3>
+  <pre><code>server.exe -help      # flags, rutas y endpoints
+server.exe -docs      # guía rápida y dónde está este manual
+agent.exe  -help
+agent.exe  -docs</code><span class="lang">bash</span></pre>
+  <p>Con el servidor en marcha, este mismo manual está en <code>http://servidor:8080/docs</code> (también <code>/help</code>), y el contrato OpenAPI en <code>/docs/openapi.yaml</code>.</p>
+</section>
+
+<section id="api">
+  <h2>3.1 API REST</h2>
+  <p>La API vive dentro de <code>server.exe</code> y comparte cola, turno y correlativo con las estaciones. Se habilita con <code>http.enabled: true</code>. Todas las rutas salvo la salud exigen el token compartido.</p>
+
+  <h3>Autenticación</h3>
+  <pre><code>Authorization: Bearer CAMBIAR-ESTE-TOKEN</code><span class="lang">http</span></pre>
+  <p>También se acepta <code>X-Spooler-Token</code>. Si la API cruza la red de la empresa, active <code>tls.enabled</code>: el servidor sirve HTTPS con el mismo certificado.</p>
+
+  <h3>Endpoints</h3>
+  <table>
+    <thead><tr><th>Método</th><th>Ruta</th><th>Para qué</th></tr></thead>
+    <tbody>
+      <tr><td><span class="badge get">GET</span></td><td><code>/v1/health</code></td><td>Salud y versión, sin token.</td></tr>
+      <tr><td><span class="badge get">GET</span></td><td><code>/v1/status</code></td><td>Impresora, cola, documento abierto y contadores. <code>?probe=true</code> consulta el hardware.</td></tr>
+      <tr><td><span class="badge get">GET</span></td><td><code>/v1/printer</code></td><td>Modelo, serial, RIF, firmware y memoria fiscal.</td></tr>
+      <tr><td><span class="badge get">GET</span></td><td><code>/v1/documents</code></td><td>Historial fiscal (<code>?limit=50</code>).</td></tr>
+      <tr><td><span class="badge post">POST</span></td><td><code>/v1/commands</code></td><td>Un comando fiscal suelto (sondas, reportes X/Z).</td></tr>
+      <tr><td><span class="badge post">POST</span></td><td><code>/v1/invoices</code></td><td>Factura completa con líneas TFHKA.</td></tr>
+      <tr><td><span class="badge post">POST</span></td><td><code>/v1/invoices/structured</code></td><td>Factura desde ítems y totales JSON; el servidor la compila.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Factura con líneas TFHKA</h3>
+  <p>Para integraciones que ya generan el protocolo. La primera línea abre la factura y la última debe ser <code>101</code>; el servidor valida la estructura antes de imprimir.</p>
+  <pre><code>curl -X POST http://127.0.0.1:8080/v1/invoices \
+  -H "Authorization: Bearer CAMBIAR-ESTE-TOKEN" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: pedido-1001" \
+  -d '{
+    "station": "ECOM-01",
+    "client_ref": "pedido-1001",
+    "lines": ["!   1.000     10.00CAFE", "101"]
+  }'</code><span class="lang">bash</span></pre>
+
+  <h3>Idempotencia y reintentos</h3>
+  <ul>
+    <li>Envíe <code>Idempotency-Key</code> (el número de pedido es perfecto).</li>
+    <li>Misma clave y mismo cuerpo: devuelve la respuesta guardada, cabecera <code>Idempotent-Replay: true</code> y <strong>no imprime otra vez</strong>.</li>
+    <li>Misma clave y cuerpo distinto: <code>409 idempotency_conflict</code>.</li>
+    <li>Sin clave, un reintento puede emitir una segunda factura.</li>
+  </ul>
+
+  <h3>Errores</h3>
+  <table>
+    <thead><tr><th>HTTP</th><th>Código</th><th>Qué hacer</th></tr></thead>
+    <tbody>
+      <tr><td>400</td><td><code>invalid_request</code></td><td>Revise el JSON, la estación o las líneas.</td></tr>
+      <tr><td>400</td><td><code>totals_mismatch</code></td><td>Los totales enviados no coinciden con los calculados.</td></tr>
+      <tr><td>401</td><td><code>unauthorized</code></td><td>Token ausente o incorrecto.</td></tr>
+      <tr><td>403</td><td><code>station_not_allowed</code></td><td>La estación no está en <code>allowed_stations</code>.</td></tr>
+      <tr><td>409</td><td><code>printer_blocked</code></td><td>Papel agotado, memoria llena o error fiscal.</td></tr>
+      <tr><td>429</td><td><code>queue_full</code></td><td>Cola llena: espere y reintente.</td></tr>
+      <tr><td>503</td><td><code>printer_unavailable</code></td><td>Impresora apagada o sin respuesta.</td></tr>
+      <tr><td>504</td><td><code>timeout</code></td><td>Venció en la cola; ese comando no se imprimió.</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="factura-items">
+  <h2>3.2 Factura desde ítems y totales</h2>
+  <p>Es la vía recomendada para ecommerce, ERP o CRM. Se envía la factura como ítems; el servidor genera las líneas TFHKA, valida el total y ejecuta la factura de forma atómica.</p>
+
+  <pre><code>curl -X POST http://127.0.0.1:8080/v1/invoices/structured \
+  -H "Authorization: Bearer CAMBIAR-ESTE-TOKEN" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: pedido-1001" \
+  -d '{
+    "station": "ECOM-01",
+    "client_ref": "pedido-1001",
+    "items": [
+      {"description": "CAFE", "quantity": 1, "unit_price": 10.00, "tax": "general"},
+      {"description": "PAN",  "quantity": 2, "unit_price": 5.00,  "tax": "reduced"}
+    ],
+    "totals": {"subtotal": 17.88, "tax": 2.12, "total": 20.00}
+  }'</code><span class="lang">bash</span></pre>
+
+  <p>Respuesta (<code>201 Created</code>):</p>
+  <pre><code>{
+  "station": "ECOM-01",
+  "order_ref": "pedido-1001",
+  "completed": true,
+  "invoice_number": 1,
+  "document_type": "invoice",
+  "sequence": 1,
+  "compiled_lines": [
+    "!   1.000     10.00CAFE",
+    "\"   2.000      5.00PAN",
+    "101"
+  ],
+  "totals": {"subtotal": 17.88, "tax": 2.12, "total": 20.00},
+  "document": {
+    "number": 1,
+    "response_text": "0|Factura 1|Total: 20.00|Impreso:1"
+  }
+}</code><span class="lang">json</span></pre>
+
+  <h3>Reglas de compilación</h3>
+  <table>
+    <thead><tr><th><code>tax</code></th><th>Prefijo TFHKA</th><th>Alícuota</th></tr></thead>
+    <tbody>
+      <tr><td><code>general</code> (omisión)</td><td><code>!</code></td><td>16 %</td></tr>
+      <tr><td><code>reduced</code></td><td><code>"</code></td><td>8 %</td></tr>
+      <tr><td><code>additional</code></td><td><code>#</code></td><td>30 %</td></tr>
+      <tr><td><code>exempt</code></td><td>espacio</td><td>0 %</td></tr>
+    </tbody>
+  </table>
+  <ul>
+    <li><code>unit_price</code> es el precio <strong>con IVA incluido</strong>, como lo maneja la TFHKA.</li>
+    <li><code>quantity</code>: 0.001 a 9999.999 (tres decimales). <code>unit_price</code>: 0 a 9.999.999,99.</li>
+    <li><code>description</code>: ASCII imprimible, máximo 40 caracteres, sin <code>|</code> ni saltos de línea. Se rechaza cualquier intento de inyectar comandos.</li>
+    <li><code>totals</code> es opcional. Si lo envía, <code>total</code> es obligatorio y se compara con el calculado (tolerancia de un centavo); <code>subtotal</code> y <code>tax</code> se comparan sólo si son mayores que cero. Una diferencia responde <code>400 totals_mismatch</code> y <strong>no imprime</strong>.</li>
+    <li>No incluye cliente ni formas de pago: para RIF, nombre, pagos o notas de crédito use <code>/v1/commands</code>.</li>
+  </ul>
+
+  <div class="tip"><strong>Consejo</strong> Guarde el <code>invoice_number</code> y el <code>issued_at</code> devueltos junto al pedido. Son los datos fiscales que su sistema debe conservar.</div>
+
+  <h3>Referencia de cada línea: <code>client_ref#índice</code></h3>
+  <p>Una factura no es un solo comando: son los ítems, el cierre <code>101</code> y, si los hay, los comandos adicionales. El servidor registra cada uno en <code>documents</code> con una referencia propia, formada por su <code>client_ref</code> y el índice de la línea:</p>
+  <pre><code>pedido-1001#0   primer ítem   (! 1.000 10.00CAFE)
+pedido-1001#1   segundo ítem  (" 2.000 5.00PAN)
+pedido-1001#2   cierre        (101)</code><span class="lang">texto</span></pre>
+  <p>El índice empieza en 0 y coincide con la posición en <code>compiled_lines</code>. El objeto <code>document</code> de la respuesta corresponde a la última línea que generó documento —el cierre—, por eso muestra <code>"client_ref": "pedido-1001#2"</code> aunque usted haya enviado <code>pedido-1001</code>. No es un error y no afecta a la idempotencia, que sigue dependiendo de <code>Idempotency-Key</code>. Si no envía <code>client_ref</code> ni clave, la referencia queda vacía y no se añade sufijo. Para no perder el dato original, la respuesta incluye <code>order_ref</code> con el <code>client_ref</code> tal como lo envió (o la <code>Idempotency-Key</code> si no envió ninguno).</p>
+</section>
+
+<section id="ejemplos">
+  <h2>4. Ejemplos por lenguaje</h2>
+  <p>Todos los ejemplos hacen lo mismo: leen la URL y el token de variables de entorno, emiten una factura de dos ítems por <code>/v1/invoices/structured</code> y muestran el número y el total. Sirven para probar el circuito y como base de una integración real.</p>
+
+  <table>
+    <thead><tr><th>Lenguaje</th><th>Archivo en el proyecto</th><th>Necesita</th></tr></thead>
+    <tbody>
+      <tr><td>cURL / PowerShell</td><td><code>examples/curl/</code></td><td>curl, o PowerShell 5+</td></tr>
+      <tr><td>PHP</td><td><code>examples/php/invoice.php</code></td><td>PHP 8+ con extensión curl</td></tr>
+      <tr><td>Go</td><td><code>examples/go/</code></td><td>Go 1.25+</td></tr>
+      <tr><td>Python</td><td><code>examples/python/invoice.py</code></td><td>Python 3.10+ (sin pip)</td></tr>
+      <tr><td>Node.js</td><td><code>examples/node/invoice.mjs</code></td><td>Node 18+ (fetch nativo)</td></tr>
+      <tr><td>Rust</td><td><code>examples/rust/</code></td><td>Rust 1.75+ (cargo)</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Variables comunes</h3>
+  <table>
+    <thead><tr><th>Variable</th><th>Omisión</th><th>Uso</th></tr></thead>
+    <tbody>
+      <tr><td><code>SPOOLER_URL</code></td><td><code>http://127.0.0.1:8080</code></td><td>base de la API</td></tr>
+      <tr><td><code>SPOOLER_TOKEN</code></td><td>— (obligatoria)</td><td>token del <code>server.yaml</code></td></tr>
+      <tr><td><code>STATION</code></td><td><code>ECOM-01</code></td><td>identificador del emisor</td></tr>
+      <tr><td><code>ORDER_ID</code></td><td><code>pedido-1001</code></td><td>referencia e <code>Idempotency-Key</code></td></tr>
+    </tbody>
+  </table>
+
+  <div class="note"><strong>Salida real verificada</strong> El 14/11/2026 se ejecutaron los ejemplos contra el simulador TFHKA. Cada uno usó una clave de idempotencia distinta (<code>pedido-1001</code> a <code>pedido-1006</code>), por eso los números y las secuencias van de 1 a 6. En su instalación empezarán en el correlativo que corresponda.</div>
+  <table>
+    <thead><tr><th>Ejemplo</th><th>Salida real (resumen)</th></tr></thead>
+    <tbody>
+      <tr><td>cURL</td><td><code>invoice_number: 1</code>, <code>order_ref: pedido-1001</code>, <code>total: 20</code> (JSON completo en 4.1)</td></tr>
+      <tr><td>PowerShell</td><td><code>Factura 2 emitida: total 20</code></td></tr>
+      <tr><td>PHP</td><td>No ejecutado: no hay intérprete PHP en el equipo de prueba.</td></tr>
+      <tr><td>Go</td><td><code>Factura 3 emitida: total 20.00 (secuencia 3)</code></td></tr>
+      <tr><td>Python</td><td><code>Factura 4 emitida: total 20.00 (secuencia 4)</code></td></tr>
+      <tr><td>Node.js</td><td><code>Factura 5 emitida: total 20.00 (secuencia 5)</code></td></tr>
+      <tr><td>Rust</td><td><code>Factura 6 emitida: total 20.00 (secuencia 6)</code></td></tr>
+    </tbody>
+  </table>
+  <p>Todas las respuestas incluyen además la línea que devolvió la impresora, por ejemplo <code>Impresora: 0|Factura 3|Total: 20.00|Impreso:3</code>.</p>
+
+  <h3 id="ej-curl">4.1 cURL (bash)</h3>
+  <p>La forma más rápida de comprobar que el servidor responde. Guarde esto como <code>invoice.sh</code>:</p>
+  <pre><code>#!/usr/bin/env bash
+set -euo pipefail
+
+SPOOLER_URL="${SPOOLER_URL:-http://127.0.0.1:8080}"
+: "${SPOOLER_TOKEN:?Defina SPOOLER_TOKEN con el token del spooler}"
+STATION="${STATION:-ECOM-01}"
+ORDER_ID="${ORDER_ID:-pedido-1001}"
+
+payload=$(cat &lt;&lt;JSON
+{
+  "station": "${STATION}",
+  "client_ref": "${ORDER_ID}",
+  "items": [
+    {"description": "CAFE", "quantity": 1, "unit_price": 10.00, "tax": "general"},
+    {"description": "PAN",  "quantity": 2, "unit_price": 5.00,  "tax": "reduced"}
+  ]
+}
+JSON
+)
+
+response=$(curl -sS -w '\n%{http_code}' -X POST "${SPOOLER_URL}/v1/invoices/structured" \
+  -H "Authorization: Bearer ${SPOOLER_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: ${ORDER_ID}" \
+  -d "${payload}")
+
+status="${response##*$'\n'}"
+body="${response%$'\n'*}"
+
+if [ "${status}" != "201" ]; then
+  echo "ERROR ${status}: ${body}" >&amp;2
+  exit 1
+fi
+
+echo "${body}" | jq -r '"Factura \(.invoice_number) emitida: total \(.totals.total)"'</code><span class="lang">bash</span></pre>
+
+  <p>Ejecución:</p>
+  <pre><code>chmod +x invoice.sh
+SPOOLER_TOKEN=CAMBIAR-ESTE-TOKEN ./invoice.sh</code><span class="lang">bash</span></pre>
+  
+  <div class="note"><strong>Salida real (cURL, 14/11/2026)</strong> El equipo de prueba no tiene <code>jq</code>, así que el script imprime el JSON completo; aquí aparece reformateado para leerlo. La respuesta incluye <code>order_ref</code> con el pedido original y <code>client_ref</code> con el sufijo de la línea.<pre style="margin:8px 0 0"><code>{
+  "station": "ECOM-01",
+  "session": "api:ECOM-01",
+  "order_ref": "pedido-1001",
+  "completed": true,
+  "invoice_number": 1,
+  "document_type": "invoice",
+  "sequence": 1,
+  "issued_at": "2026-11-14T21:24:52Z",
+  "duplicate": false,
+  "lines": [
+    {
+      "index": 0,
+      "response": "0|Item|CAFE|1.000|10.00|1.38|10.00\r\n",
+      "sequence": 1,
+      "queue_wait_ms": 0,
+      "latency_ms": 106
+    },
+    {
+      "index": 1,
+      "response": "0|Item|PAN|2.000|5.00|0.74|10.00\r\n",
+      "sequence": 2,
+      "queue_wait_ms": 0,
+      "latency_ms": 31
+    },
+    {
+      "index": 2,
+      "response": "0|Factura 1|Total: 20.00|Impreso:1\r\n",
+      "sequence": 3,
+      "queue_wait_ms": 0,
+      "latency_ms": 30
+    }
+  ],
+  "document": {
+    "sequence": 1,
+    "type": "invoice",
+    "number": 1,
+    "station": "ECOM-01",
+    "session": "api:ECOM-01",
+    "issued_at": "2026-11-14T21:24:52Z",
+    "response_text": "0|Factura 1|Total: 20.00|Impreso:1",
+    "duplicate": false,
+    "client_ref": "pedido-1001#2",
+    "request_sha256": "bdc830287616dae1818ced3e7c186e1387155900ad30d5983ec02da1519c4a95",
+    "response_sha256": "0d9f3895840dd3261ea86cfcdb2d4ad76bafeac6a818498c700015933481adae"
+  },
+  "elapsed_ms": 170,
+  "compiled_lines": [
+    "!   1.000     10.00CAFE",
+    "\"   2.000      5.00PAN",
+    "101"
+  ],
+  "totals": {
+    "subtotal": 17.88,
+    "tax": 2.12,
+    "total": 20
+  }
+}</code></pre></div>
+
+
+  <div class="tip"><strong>¿Por qué <code>client_ref</code> termina en <code>#2</code>?</strong> Es la referencia del cierre <code>101</code>, la última de las tres líneas. El servidor añade <code>#índice</code> a cada comando para la auditoría; el pedido sigue siendo <code>pedido-1001</code>. Ver «Referencia de cada línea» en la sección 3.</div>
+
+  <h3 id="ej-powershell">4.2 PowerShell</h3>
+  <pre><code>$env:SPOOLER_URL   = "http://127.0.0.1:8080"
+$env:SPOOLER_TOKEN = "CAMBIAR-ESTE-TOKEN"
+
+$body = @{
+    station    = "ECOM-01"
+    client_ref = "pedido-1001"
+    items      = @(
+        @{ description = "CAFE"; quantity = 1; unit_price = 10.00; tax = "general" }
+        @{ description = "PAN";  quantity = 2; unit_price = 5.00;  tax = "reduced" }
+    )
+} | ConvertTo-Json -Depth 5
+
+$factura = Invoke-RestMethod -Method Post `
+    -Uri "$($env:SPOOLER_URL)/v1/invoices/structured" `
+    -Headers @{
+        Authorization     = "Bearer $($env:SPOOLER_TOKEN)"
+        "Idempotency-Key" = "pedido-1001"
+    } `
+    -ContentType "application/json; charset=utf-8" `
+    -Body ([System.Text.Encoding]::UTF8.GetBytes($body))
+
+"Factura $($factura.invoice_number) emitida: total $($factura.totals.total)"</code><span class="lang">powershell</span></pre>
+  
+  <div class="note"><strong>Salida real (PowerShell, 14/11/2026)</strong><pre style="margin:8px 0 0"><code>Factura 2 emitida: total 20
+Impresora: 0|Factura 2|Total: 20.00|Impreso:2</code></pre></div>
+
+
+  <h3 id="ej-php">4.3 PHP 8+</h3>
+  <p>Requiere la extensión <code>curl</code> (incluida en las builds de PHP para Windows; en Linux, <code>php-curl</code>).</p>
+  <pre><code>&lt;?php
+declare(strict_types=1);
+
+$base    = getenv('SPOOLER_URL') ?: 'http://127.0.0.1:8080';
+$token   = getenv('SPOOLER_TOKEN') ?: '';
+$station = getenv('STATION') ?: 'ECOM-01';
+$order   = getenv('ORDER_ID') ?: 'pedido-1001';
+
+if ($token === '') {
+    fwrite(STDERR, "Defina SPOOLER_TOKEN con el token del spooler.\n");
+    exit(1);
+}
+
+$payload = [
+    'station'    =&gt; $station,
+    'client_ref' =&gt; $order,
+    'items'      =&gt; [
+        ['description' =&gt; 'CAFE', 'quantity' =&gt; 1, 'unit_price' =&gt; 10.00, 'tax' =&gt; 'general'],
+        ['description' =&gt; 'PAN',  'quantity' =&gt; 2, 'unit_price' =&gt; 5.00,  'tax' =&gt; 'reduced'],
+    ],
+];
+
+$ch = curl_init($base . '/v1/invoices/structured');
+curl_setopt_array($ch, [
+    CURLOPT_POST           =&gt; true,
+    CURLOPT_RETURNTRANSFER =&gt; true,
+    CURLOPT_TIMEOUT        =&gt; 60,
+    CURLOPT_HTTPHEADER     =&gt; [
+        'Authorization: Bearer ' . $token,
+        'Content-Type: application/json',
+        'Idempotency-Key: ' . $order,
+    ],
+    CURLOPT_POSTFIELDS     =&gt; json_encode($payload, JSON_UNESCAPED_UNICODE),
+]);
+
+$body   = curl_exec($ch);
+$status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+$error  = curl_error($ch);
+curl_close($ch);
+
+if ($body === false) {
+    fwrite(STDERR, "Error de red: {$error}\n");
+    exit(1);
+}
+if ($status !== 201) {
+    fwrite(STDERR, "ERROR {$status}: {$body}\n");
+    exit(1);
+}
+
+$factura = json_decode($body, true, 512, JSON_THROW_ON_ERROR);
+printf(
+    "Factura %d emitida: total %.2f (secuencia %d)\n",
+    $factura['invoice_number'],
+    $factura['totals']['total'],
+    $factura['sequence']
+);</code><span class="lang">php</span></pre>
+
+  <p>Ejecución:</p>
+  <pre><code>SPOOLER_TOKEN=CAMBIAR-ESTE-TOKEN php invoice.php</code><span class="lang">bash</span></pre>
+  <div class="warn"><strong>No verificado</strong> El equipo de prueba no tiene intérprete PHP, así que este ejemplo no se ejecutó. Los otros cinco sí se ejecutaron contra el simulador el 14/11/2026.</div>
+
+
+  <h3 id="ej-go">4.4 Go</h3>
+  <p>Sólo biblioteca estándar. El ejemplo vive en su propio módulo (<code>examples/go/go.mod</code>) para no interferir con el módulo principal.</p>
+  <pre><code>package main
+
+import (
+    "bytes"
+    "encoding/json"
+    "fmt"
+    "io"
+    "net/http"
+    "os"
+    "time"
+)
+
+type item struct {
+    Description string  `json:"description"`
+    Quantity    float64 `json:"quantity"`
+    UnitPrice   float64 `json:"unit_price"`
+    Tax         string  `json:"tax,omitempty"`
+}
+
+type invoiceRequest struct {
+    Station   string `json:"station"`
+    ClientRef string `json:"client_ref,omitempty"`
+    Items     []item `json:"items"`
+}
+
+func main() {
+    base := env("SPOOLER_URL", "http://127.0.0.1:8080")
+    station := env("STATION", "ECOM-01")
+    order := env("ORDER_ID", "pedido-1001")
+    token := os.Getenv("SPOOLER_TOKEN")
+    if token == "" {
+        fmt.Fprintln(os.Stderr, "Defina SPOOLER_TOKEN.")
+        os.Exit(1)
+    }
+
+    payload := invoiceRequest{
+        Station:   station,
+        ClientRef: order,
+        Items: []item{
+            {Description: "CAFE", Quantity: 1, UnitPrice: 10.00, Tax: "general"},
+            {Description: "PAN", Quantity: 2, UnitPrice: 5.00, Tax: "reduced"},
+        },
+    }
+    body, _ := json.Marshal(payload)
+
+    req, err := http.NewRequest(http.MethodPost, base+"/v1/invoices/structured", bytes.NewReader(body))
+    if err != nil {
+        fmt.Fprintln(os.Stderr, "petición:", err)
+        os.Exit(1)
+    }
+    req.Header.Set("Authorization", "Bearer "+token)
+    req.Header.Set("Content-Type", "application/json")
+    req.Header.Set("Idempotency-Key", order)
+
+    client := &amp;http.Client{Timeout: 60 * time.Second}
+    resp, err := client.Do(req)
+    if err != nil {
+        fmt.Fprintln(os.Stderr, "red:", err)
+        os.Exit(1)
+    }
+    defer resp.Body.Close()
+    data, _ := io.ReadAll(resp.Body)
+
+    if resp.StatusCode != http.StatusCreated {
+        fmt.Fprintf(os.Stderr, "ERROR %d: %s\n", resp.StatusCode, data)
+        os.Exit(1)
+    }
+
+    var out struct {
+        InvoiceNumber int64 `json:"invoice_number"`
+        Sequence      int64 `json:"sequence"`
+        Totals        struct {
+            Total float64 `json:"total"`
+        } `json:"totals"`
+        Document *struct {
+            ResponseText string `json:"response_text"`
+        } `json:"document"`
+    }
+    if err := json.Unmarshal(data, &amp;out); err != nil {
+        fmt.Fprintln(os.Stderr, "JSON:", err)
+        os.Exit(1)
+    }
+
+    fmt.Printf("Factura %d emitida: total %.2f (secuencia %d)\n",
+        out.InvoiceNumber, out.Totals.Total, out.Sequence)
+    if out.Document != nil &amp;&amp; out.Document.ResponseText != "" {
+        fmt.Printf("Impresora: %s\n", out.Document.ResponseText)
+    }
+}
+
+func env(key, def string) string {
+    if v := os.Getenv(key); v != "" {
+        return v
+    }
+    return def
+}</code><span class="lang">go</span></pre>
+
+  <p>Ejecución:</p>
+  <pre><code>cd examples/go
+SPOOLER_TOKEN=CAMBIAR-ESTE-TOKEN go run .</code><span class="lang">bash</span></pre>
+  
+  <div class="note"><strong>Salida real (Go, 14/11/2026)</strong><pre style="margin:8px 0 0"><code>Factura 3 emitida: total 20.00 (secuencia 3)
+Impresora: 0|Factura 3|Total: 20.00|Impreso:3</code></pre></div>
+
+
+  <h3 id="ej-python">4.5 Python 3.10+</h3>
+  <p>Sin dependencias: usa <code>urllib</code> de la biblioteca estándar, así que no hace falta <code>pip install</code>.</p>
+  <pre><code>#!/usr/bin/env python3
+import json
+import os
+import sys
+import urllib.error
+import urllib.request
+
+
+def env(key: str, default: str) -&gt; str:
+    return os.environ.get(key) or default
+
+
+def main() -&gt; int:
+    base = env("SPOOLER_URL", "http://127.0.0.1:8080").rstrip("/")
+    station = env("STATION", "ECOM-01")
+    order = env("ORDER_ID", "pedido-1001")
+    token = os.environ.get("SPOOLER_TOKEN", "")
+    if not token:
+        print("Defina SPOOLER_TOKEN.", file=sys.stderr)
+        return 1
+
+    payload = {
+        "station": station,
+        "client_ref": order,
+        "items": [
+            {"description": "CAFE", "quantity": 1, "unit_price": 10.00, "tax": "general"},
+            {"description": "PAN", "quantity": 2, "unit_price": 5.00, "tax": "reduced"},
+        ],
+    }
+    req = urllib.request.Request(
+        f"{base}/v1/invoices/structured",
+        data=json.dumps(payload).encode("utf-8"),
+        method="POST",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+            "Idempotency-Key": order,
+        },
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            status = resp.status
+            body = resp.read().decode("utf-8")
+    except urllib.error.HTTPError as exc:
+        print(f"ERROR {exc.code}: {exc.read().decode('utf-8', 'replace')}", file=sys.stderr)
+        return 1
+    except urllib.error.URLError as exc:
+        print(f"Error de red: {exc.reason}", file=sys.stderr)
+        return 1
+
+    if status != 201:
+        print(f"ERROR {status}: {body}", file=sys.stderr)
+        return 1
+
+    factura = json.loads(body)
+    print(
+        f"Factura {factura['invoice_number']} emitida: "
+        f"total {factura['totals']['total']:.2f} (secuencia {factura['sequence']})"
+    )
+    texto = (factura.get("document") or {}).get("response_text", "")
+    if texto:
+        print(f"Impresora: {texto}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())</code><span class="lang">python</span></pre>
+
+  <p>Ejecución:</p>
+  <pre><code>SPOOLER_TOKEN=CAMBIAR-ESTE-TOKEN python invoice.py</code><span class="lang">bash</span></pre>
+  
+  <div class="note"><strong>Salida real (Python, 14/11/2026)</strong><pre style="margin:8px 0 0"><code>Factura 4 emitida: total 20.00 (secuencia 4)
+Impresora: 0|Factura 4|Total: 20.00|Impreso:4</code></pre></div>
+
+
+  <h3 id="ej-node">4.6 Node.js 18+</h3>
+  <p>Usa <code>fetch</code> nativo y <code>AbortSignal.timeout</code>: sin <code>npm install</code>.</p>
+  <pre><code>#!/usr/bin/env node
+const base = (process.env.SPOOLER_URL ?? "http://127.0.0.1:8080").replace(/\/$/, "");
+const station = process.env.STATION ?? "ECOM-01";
+const order = process.env.ORDER_ID ?? "pedido-1001";
+const token = process.env.SPOOLER_TOKEN;
+
+if (!token) {
+  console.error("Defina SPOOLER_TOKEN.");
+  process.exit(1);
+}
+
+const payload = {
+  station,
+  client_ref: order,
+  items: [
+    { description: "CAFE", quantity: 1, unit_price: 10.0, tax: "general" },
+    { description: "PAN", quantity: 2, unit_price: 5.0, tax: "reduced" },
+  ],
+};
+
+const res = await fetch(`${base}/v1/invoices/structured`, {
+  method: "POST",
+  headers: {
+    Authorization: `Bearer ${token}`,
+    "Content-Type": "application/json",
+    "Idempotency-Key": order,
+  },
+  body: JSON.stringify(payload),
+  signal: AbortSignal.timeout(60_000),
+});
+
+const text = await res.text();
+if (res.status !== 201) {
+  console.error(`ERROR ${res.status}: ${text}`);
+  process.exit(1);
+}
+
+const factura = JSON.parse(text);
+console.log(
+  `Factura ${factura.invoice_number} emitida: total ${factura.totals.total.toFixed(2)} ` +
+    `(secuencia ${factura.sequence})`
+);
+if (factura.document?.response_text) {
+  console.log(`Impresora: ${factura.document.response_text}`);
+}</code><span class="lang">javascript</span></pre>
+
+  <p>Ejecución:</p>
+  <pre><code>SPOOLER_TOKEN=CAMBIAR-ESTE-TOKEN node invoice.mjs</code><span class="lang">bash</span></pre>
+  
+  <div class="note"><strong>Salida real (Node.js, 14/11/2026)</strong><pre style="margin:8px 0 0"><code>Factura 5 emitida: total 20.00 (secuencia 5)
+Impresora: 0|Factura 5|Total: 20.00|Impreso:5</code></pre></div>
+
+
+  <h3 id="ej-rust">4.7 Rust 1.75+</h3>
+  <p>Con <code>ureq</code> y <code>serde_json</code>. Cree un proyecto con <code>cargo new</code> o use <code>examples/rust</code>; el <code>Cargo.toml</code> necesita:</p>
+  <pre><code>[package]
+name = "spooler-ejemplo"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+serde_json = "1"
+ureq = { version = "2", features = ["json"] }</code><span class="lang">toml</span></pre>
+
+  <pre><code>use serde_json::{json, Value};
+use std::env;
+
+fn env_or(key: &amp;str, default: &amp;str) -&gt; String {
+    env::var(key).unwrap_or_else(|_| default.to_string())
+}
+
+fn main() -&gt; Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
+    let base = env_or("SPOOLER_URL", "http://127.0.0.1:8080");
+    let station = env_or("STATION", "ECOM-01");
+    let order = env_or("ORDER_ID", "pedido-1001");
+    let token = env::var("SPOOLER_TOKEN")
+        .map_err(|_| "Defina SPOOLER_TOKEN con el token del spooler")?;
+
+    let payload = json!({
+        "station": station,
+        "client_ref": order,
+        "items": [
+            {"description": "CAFE", "quantity": 1, "unit_price": 10.00, "tax": "general"},
+            {"description": "PAN",  "quantity": 2, "unit_price": 5.00,  "tax": "reduced"}
+        ]
+    });
+
+    let result = ureq::post(&amp;format!("{base}/v1/invoices/structured"))
+        .set("Authorization", &amp;format!("Bearer {token}"))
+        .set("Content-Type", "application/json")
+        .set("Idempotency-Key", &amp;order)
+        .send_json(payload);
+
+    let response = match result {
+        Ok(r) =&gt; r,
+        Err(ureq::Error::Status(code, r)) =&gt; {
+            eprintln!("ERROR {code}: {}", r.into_string()?);
+            std::process::exit(1);
+        }
+        Err(e) =&gt; return Err(e.into()),
+    };
+
+    let body: Value = response.into_json()?;
+    let number = body["invoice_number"].as_i64().unwrap_or(0);
+    let total = body["totals"]["total"].as_f64().unwrap_or(0.0);
+    let sequence = body["sequence"].as_i64().unwrap_or(0);
+    println!("Factura {number} emitida: total {total:.2} (secuencia {sequence})");
+    if let Some(texto) = body["document"]["response_text"].as_str() {
+        println!("Impresora: {texto}");
+    }
+    Ok(())
+}</code><span class="lang">rust</span></pre>
+
+  <p>Ejecución:</p>
+  <pre><code>cd examples/rust
+SPOOLER_TOKEN=CAMBIAR-ESTE-TOKEN cargo run</code><span class="lang">bash</span></pre>
+  
+  <div class="note"><strong>Salida real (Rust, 14/11/2026)</strong><pre style="margin:8px 0 0"><code>Factura 6 emitida: total 20.00 (secuencia 6)
+Impresora: 0|Factura 6|Total: 20.00|Impreso:6</code></pre></div>
+
+
+  <div class="tip"><strong>Integración real</strong> En producción, guarde el <code>invoice_number</code>, el <code>issued_at</code> y la respuesta de la impresora junto al pedido, y use el id del pedido como <code>Idempotency-Key</code>. Si el servidor responde 504, el comando no se imprimió: es seguro reintentar con la misma clave.</div>
+</section>
+<section id="operacion">
+  <h2>5. Operación diaria</h2>
+
+  <h3>Logs</h3>
+  <table>
+    <thead><tr><th>Archivo</th><th>Qué contiene</th></tr></thead>
+    <tbody>
+      <tr><td><code>logs\server.log</code></td><td>Sesiones, documentos registrados, bloqueos del guardián, métricas cada minuto y errores de impresora.</td></tr>
+      <tr><td><code>logs\agent.log</code></td><td>Apertura del COM virtual, reconexiones, reintentos y contadores de tramas.</td></tr>
+    </tbody>
+  </table>
+  <p>La rotación se configura en <code>logging</code> (<code>max_size_mb</code>, <code>max_backups</code>, <code>max_age_days</code>, <code>compress</code>). Suba a <code>debug</code> sólo para diagnosticar: genera mucho volumen.</p>
+
+  <h3>Qué mirar cada día</h3>
+  <pre><code>curl -H "Authorization: Bearer TOKEN" http://servidor:8080/v1/status</code><span class="lang">bash</span></pre>
+  <ul>
+    <li><code>online</code>: la impresora responde.</li>
+    <li><code>blocked_reason</code>: papel agotado, memoria llena o error fiscal.</li>
+    <li><code>duplicates_detected</code>: si sube, hubo un número repetido; revise el log.</li>
+    <li><code>queue_depth</code>: cola acumulada. Con una impresora real, 10 facturas en cola son ~20 segundos.</li>
+  </ul>
+
+  <h3>Respaldo</h3>
+  <p>Todo el historial fiscal vive en <code>data\spooler.db</code> (SQLite en modo WAL). Para un respaldo consistente:</p>
+  <ol>
+    <li>Detenga el servicio: <code>sc stop SpoolerFiscalServer</code>.</li>
+    <li>Copie la carpeta <code>data\</code> completa (incluye <code>.db-wal</code> y <code>.db-shm</code>).</li>
+    <li>Vuelva a iniciarlo: <code>sc start SpoolerFiscalServer</code>.</li>
+  </ol>
+  <p>La tabla <code>documents</code> no se purga nunca; <code>command_log</code> se recorta según <code>database.retention_days</code>.</p>
+
+  <h3>Permisos</h3>
+  <p>Al arrancar, el servicio restringe la ACL del YAML (contiene el token) y de <code>data\</code> a SYSTEM, Administradores y el usuario que ejecuta. Si corre en consola, hágalo como administrador o como el usuario que instaló: el token ya no es legible por el grupo <i>Usuarios</i>.</p>
+
+  <h3>Actualizar</h3>
+  <ol>
+    <li>Detenga servidor y agentes.</li>
+    <li>Reemplace los <code>.exe</code> (guarde una copia de los anteriores).</li>
+    <li>Revise el YAML: las claves nuevas tienen valores por omisión.</li>
+    <li>Inicie el servidor, verifique <code>/v1/health</code> y emita una factura de prueba.</li>
+    <li>Actualice los agentes uno por uno.</li>
+  </ol>
+</section>
+
+<section id="seguridad">
+  <h2>6. Seguridad</h2>
+  <ul>
+    <li><strong>Token compartido:</strong> es la única credencial de estaciones y REST. Use uno largo y distinto por instalación. Se puede inyectar con <code>SPOOLER_TOKEN</code> sin escribirlo en el YAML.</li>
+    <li><strong>HTTPS:</strong> active <code>tls.enabled</code> con certificado y clave. Para gRPC, <code>tls.ca_file</code> activa mTLS entre agente y servidor. La REST usa el mismo certificado pero autentica por token.</li>
+    <li><strong>Firewall:</strong> abra 5050 y 8080 sólo hacia la red de la empresa. No exponga la API a Internet.</li>
+    <li><strong>Lista blanca:</strong> <code>allowed_stations</code> limita qué estaciones pueden abrir sesión.</li>
+    <li><strong>Permisos:</strong> el YAML y <code>data\</code> quedan restringidos; no los copie a equipos de usuarios.</li>
+    <li><strong>Auditoría:</strong> no borre <code>documents</code>. Es su respaldo ante una discrepancia fiscal.</li>
+  </ul>
+  <div class="warn"><strong>Si se filtra el token</strong> Detenga el servidor, cambie <code>token</code> en el YAML y en todos los agentes, y reinicie. Las sesiones abiertas dejan de valer.</div>
+</section>
+
+<section id="problemas">
+  <h2>7. Problemas frecuentes</h2>
+  <table>
+    <thead><tr><th>Síntoma</th><th>Causa probable</th><th>Solución</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>«La impresora no respondió» y el comando no se reenvía</td>
+        <td>Terminador incorrecto o cable/puerto.</td>
+        <td>Use <code>command_terminator: "\r\n"</code>. Con <code>\r</code> solo la TFHKA no responde. Revise baudios y cable.</td>
+      </tr>
+      <tr>
+        <td>El agente repite «Serial port not found»</td>
+        <td>COM virtual cerrado o com0com no instalado.</td>
+        <td>Cree el par con com0com y confirme que <code>virtual_com.name</code> es el extremo del agente (COM4).</td>
+      </tr>
+      <tr>
+        <td>Profit Plus no imprime pero el agente está vivo</td>
+        <td>Otro programa tiene abierto COM3, o parámetros distintos.</td>
+        <td>Cierre el otro programa y use 9600 8N1 sin control de flujo en ambos extremos.</td>
+      </tr>
+      <tr>
+        <td><code>401 unauthorized</code></td>
+        <td>Token ausente o distinto.</td>
+        <td>Copie el mismo <code>token</code> en servidor y agentes; revise <code>SPOOLER_TOKEN</code>.</td>
+      </tr>
+      <tr>
+        <td><code>403 station_not_allowed</code></td>
+        <td>La estación no está en la lista blanca.</td>
+        <td>Añádala a <code>allowed_stations</code> o deje la lista vacía.</td>
+      </tr>
+      <tr>
+        <td><code>409 printer_blocked</code></td>
+        <td>Papel agotado, memoria fiscal llena o error fiscal.</td>
+        <td>Resuelva en la impresora; el bloqueo se libera con la siguiente respuesta limpia.</td>
+      </tr>
+      <tr>
+        <td><code>409 idempotency_conflict</code></td>
+        <td>La clave ya se usó con otro cuerpo.</td>
+        <td>Use una clave distinta por pedido; no reutilice la de otra factura.</td>
+      </tr>
+      <tr>
+        <td><code>429 queue_full</code></td>
+        <td>Más comandos pendientes que <code>max_pending</code>.</td>
+        <td>Espere unos segundos y reintente; revise si la impresora está lenta o bloqueada.</td>
+      </tr>
+      <tr>
+        <td><code>504 timeout</code></td>
+        <td>Venció en la cola; el comando no se imprimió.</td>
+        <td>Suba <code>default_timeout_ms</code> (60-90 s en ráfagas) y reintente con la misma clave.</td>
+      </tr>
+      <tr>
+        <td>Facturas de dos cajas mezcladas</td>
+        <td>Versión antigua o dos servidores sobre la misma impresora.</td>
+        <td>Un solo servidor por impresora. Actualice: el turno por factura impide el intercalado.</td>
+      </tr>
+      <tr>
+        <td>«Doble emisión detectada» en el log</td>
+        <td>La impresora devolvió un número ya registrado.</td>
+        <td>No borre el registro. Investigue el pedido; el original se conserva en <code>documents</code>.</td>
+      </tr>
+      <tr>
+        <td><code>/docs</code> responde 404</td>
+        <td>La API REST está apagada.</td>
+        <td>Active <code>http.enabled: true</code> y reinicie el servidor.</td>
+      </tr>
+      <tr>
+        <td>El servicio no arranca</td>
+        <td>Config inválida, puerto ocupado o permisos.</td>
+        <td>Ejecute en consola con <code>-console</code> para ver el error; revise <code>logs\server.log</code>.</td>
+      </tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="faq">
+  <h2>8. Preguntas frecuentes</h2>
+
+  <h4>¿Puedo tener dos impresoras fiscales?</h4>
+  <p>Un servidor atiende una impresora. Para dos, ejecute dos instancias con puertos, bases y tokens distintos, y asigne cada estación a la suya.</p>
+
+  <h4>¿Sirve para otra marca?</h4>
+  <p>Hoy sólo TFHKA (The Factory HKA, ASCII). El driver está aislado en <code>internal/fiscal</code>; otra marca requiere un driver nuevo (por ejemplo IxBatch) y validación con el hardware.</p>
+
+  <h4>¿Puedo facturar sin Profit Plus?</h4>
+  <p>Sí. La API REST existe justamente para eso: ecommerce, ERP web o CRM envían la factura por HTTP. El agente y com0com sólo son necesarios para las cajas con Profit Plus.</p>
+
+  <h4>¿Qué pasa si se cae el servidor?</h4>
+  <p>Las estaciones no pueden emitir: el agente reintenta con backoff y el comando no se pierde si aún no se escribió. Al volver el servidor, el correlativo y el historial se recuperan de SQLite. Un comando que ya se escribió no se reenvía.</p>
+
+  <h4>¿Se pueden perder facturas?</h4>
+  <p>El servidor registra cada documento con hashes de comando y respuesta. Si la impresora se corta después de escribir, el log lo advierte y no reintenta para evitar una doble emisión; el operador debe revisar el papel.</p>
+
+  <h4>¿Cuántas cajas soporta?</h4>
+  <p>El límite es la impresora: 0,3-1 factura por segundo. Diez cajas con ráfagas funcionan, pero la última espera. Ajuste los timeouts; la cola admite 256 comandos por omisión.</p>
+
+  <h4>¿La API REST es la misma cola que Profit Plus?</h4>
+  <p>Sí. Comparten cola, turno por factura, guardián y correlativo. Un pedido de ecommerce y una factura de caja no se pisan.</p>
+
+  <h4>¿Cómo pruebo sin impresora?</h4>
+  <p>Use el simulador del proyecto <code>SimuladorFiscalGO</code> con <code>printer.transport: tcp</code> y <code>tcp_address: 127.0.0.1:2011</code>. Todos los ejemplos funcionan contra él.</p>
+
+  <h4>¿Dónde está la documentación?</h4>
+  <p>Este manual, <code>docs\API.md</code> (guía REST), <code>api\openapi.yaml</code> (contrato), <code>docs\INSTALACION.md</code>, <code>docs\OPERACION.md</code>, <code>docs\PROTOCOLO_TFHKA.md</code> y <code>docs\PROFITPLUS.md</code>.</p>
+
+  <h4>¿Qué licencia tiene?</h4>
+  <p>MIT. Ver <code>LICENSE</code>.</p>
+</section>
+
+<section id="referencias">
+  <h2>9. Referencias</h2>
+  <table>
+    <thead><tr><th>Documento</th><th>Contenido</th></tr></thead>
+    <tbody>
+      <tr><td><code>docs\API.md</code></td><td>Guía de la API REST, reglas de compilación y errores.</td></tr>
+      <tr><td><code>api\openapi.yaml</code></td><td>Contrato OpenAPI 3.0 (importable en Postman/Insomnia).</td></tr>
+      <tr><td><code>docs\INSTALACION.md</code></td><td>Instalación paso a paso, com0com y firewall.</td></tr>
+      <tr><td><code>docs\OPERACION.md</code></td><td>Logs, permisos, capacidad, respaldo y diagnóstico.</td></tr>
+      <tr><td><code>docs\PROTOCOLO_TFHKA.md</code></td><td>Comandos, estado, errores y framing.</td></tr>
+      <tr><td><code>docs\PROFITPLUS.md</code></td><td>Configuración de Profit Plus por versión.</td></tr>
+      <tr><td><code>docs\DECISIONES.md</code></td><td>Por qué cada decisión técnica.</td></tr>
+      <tr><td><code>examples\</code></td><td>Ejemplos ejecutables en seis lenguajes.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Ayuda en línea</h3>
+  <ul>
+    <li><code>http://servidor:8080/docs</code> — este manual, servido por el propio servidor.</li>
+    <li><code>http://servidor:8080/help</code> — redirige al manual.</li>
+    <li><code>http://servidor:8080/docs/openapi.yaml</code> — contrato OpenAPI.</li>
+    <li><code>server.exe -help</code> y <code>agent.exe -help</code> — ayuda de consola.</li>
+  </ul>
+
+  <div class="note"><strong>Antes de producción</strong> Cambie el token, active TLS si cruza red, abra sólo los puertos necesarios, pruebe una factura real, verifique el correlativo y programe el respaldo de <code>data\</code>.</div>
+</section>
+
+</main>
+</div>
+
+<footer>
+  <div class="wrap">
+    <span>Spooler Fiscal · manual de usuario · licencia MIT</span>
+    <span>Generado desde <code>internal/server/web/manual.html</code> · servido en <code>/docs</code></span>
+  </div>
+</footer>
+
+<script>
+(() => {
+  // Botón de copiar en cada bloque de código.
+  document.querySelectorAll('pre').forEach((pre) => {
+    const code = pre.querySelector('code');
+    if (!code) return;
+    const btn = document.createElement('button');
+    btn.className = 'copy';
+    btn.type = 'button';
+    btn.textContent = 'Copiar';
+    btn.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(code.innerText);
+        btn.textContent = 'Copiado';
+        setTimeout(() => (btn.textContent = 'Copiar'), 1500);
+      } catch {
+        btn.textContent = 'No disponible';
+      }
+    });
+    pre.appendChild(btn);
+  });
+
+  // Resaltar la sección visible en el índice.
+  const links = Array.from(document.querySelectorAll('#tocList a'));
+  const byId = new Map(links.map((a) => [a.getAttribute('href').slice(1), a]));
+  const targets = Array.from(document.querySelectorAll('section[id], h3[id]'));
+  if ('IntersectionObserver' in window) {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (!entry.isIntersecting) continue;
+          const link = byId.get(entry.target.id);
+          if (!link) continue;
+          links.forEach((a) => a.classList.remove('active'));
+          link.classList.add('active');
+        }
+      },
+      { rootMargin: '-15% 0px -75% 0px', threshold: 0 }
+    );
+    targets.forEach((t) => observer.observe(t));
+  }
+
+  // Búsqueda simple sobre el índice.
+  const search = document.getElementById('tocSearch');
+  const items = Array.from(document.querySelectorAll('#tocList li'));
+  search?.addEventListener('input', () => {
+    const q = search.value.trim().toLowerCase();
+    items.forEach((li) => {
+      li.style.display = li.textContent.toLowerCase().includes(q) ? '' : 'none';
+    });
+  });
+})();
+</script>
+</body>
+</html>
