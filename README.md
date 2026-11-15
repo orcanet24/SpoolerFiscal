@@ -98,6 +98,10 @@ virtual que se ve en el navegador. Al igual que los simuladores externos,
 **no emite documentos fiscales válidos**. Detalle en
 [`docs/INSTALACION.md`](docs/INSTALACION.md).
 
+Ejemplos de factura, nota de crédito, nota de débito, reporte X y reporte Z con
+`curl`, y cómo activar el servidor y el agente, en
+[`docs/PRUEBAS.md`](docs/PRUEBAS.md).
+
 ## Situación fiscal y SENIAT
 
 La normativa cambia y la autorización depende del contribuyente, su actividad,
