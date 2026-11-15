@@ -86,6 +86,16 @@ no viene incluido en este repositorio ni es una impresora fiscal real: sirve
 para probar comunicación y flujos de software, no para emitir documentos
 fiscales válidos ni sustituir hardware fiscal en producción.
 
+### Papel real con una térmica común: `simprint`
+
+Este repositorio incluye `cmd/simprint` (compilado a `bin\simprint\simprint.exe`
+por `build.bat`): un emulador de impresora fiscal TFHKA que imprime con papel
+real en una térmica de 80 mm (ESC/POS) conectada por USB (cola de Windows,
+`-win-printer "Xprinter XP-80"`), por red (`-escpos-tcp ip:9100`) o por COM
+(`-com`). Sirve para probar el spooler completo contra papel físico sin
+hardware fiscal. Al igual que los simuladores externos, **no emite documentos
+fiscales válidos**. Detalle en [`docs/INSTALACION.md`](docs/INSTALACION.md).
+
 ## Situación fiscal y SENIAT
 
 La normativa cambia y la autorización depende del contribuyente, su actividad,

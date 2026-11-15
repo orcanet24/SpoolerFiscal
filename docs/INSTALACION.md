@@ -162,6 +162,34 @@ $env:SPOOLER_E2E_PRINTER_ADDR = "127.0.0.1:2011"
 go test ./internal/e2e -run TestAgainstExternalPrinter -v
 ```
 
+### Papel real en una térmica común (simprint)
+
+`simprint` (en `bin\simprint\simprint.exe`, incluido por `build.bat`) es un
+emulador de impresora fiscal TFHKA que **imprime con papel real** en una
+térmica de 80 mm (ESC/POS): hace de impresora fiscal en el protocolo y de
+térmica en la salida. No emite documentos fiscales válidos: es para probar el
+circuito completo (correlativo, cola, pausa por papel, reintentos, formato).
+
+```powershell
+# térmica instalada en Windows (USB00x), como una Xprinter XP-80
+.\bin\simprint\simprint.exe -listen 127.0.0.1:2011 -win-printer "Xprinter XP-80"
+
+# térmica de red (puerto 9100)
+.\bin\simprint\simprint.exe -listen 127.0.0.1:2011 -escpos-tcp 192.168.1.50:9100
+
+# térmica por puerto COM (modo CDC/serie)
+.\bin\simprint\simprint.exe -listen 127.0.0.1:2011 -com COM5
+
+# solo texto en consola (vista previa, sin hardware)
+.\bin\simprint\simprint.exe -listen 127.0.0.1:2011
+```
+
+Con el servidor apuntado a `printer.transport = tcp` y
+`printer.tcp_address = 127.0.0.1:2011`, cada factura del spooler se imprime en
+la térmica. La tecla `p` + Enter alterna el sensor de papel para probar la
+pausa y reanudación de la cola; `estado` muestra los correlativos; `salir`
+cierra guardando el estado en `data\simprint_state.json`.
+
 ## 5. Desinstalar
 
 ```powershell

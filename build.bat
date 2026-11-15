@@ -5,6 +5,7 @@ set "ROOT=%~dp0"
 set "BIN=%ROOT%bin"
 set "CLIENTE=%BIN%\cliente"
 set "SERVER=%BIN%\server"
+set "SIMPRINT=%BIN%\simprint"
 
 where go >nul 2>nul
 if errorlevel 1 (
@@ -15,6 +16,8 @@ if errorlevel 1 (
 if not exist "%CLIENTE%\configs" mkdir "%CLIENTE%\configs"
 if errorlevel 1 goto :error
 if not exist "%SERVER%\configs" mkdir "%SERVER%\configs"
+if errorlevel 1 goto :error
+if not exist "%SIMPRINT%" mkdir "%SIMPRINT%"
 if errorlevel 1 goto :error
 
 if not exist "%CLIENTE%\configs\agent.yaml" copy "%ROOT%configs\agent.yaml" "%CLIENTE%\configs\agent.yaml" >nul
@@ -57,6 +60,13 @@ if errorlevel 1 (
     popd
     goto :error
 )
+
+echo Compilando simulador de impresion (simprint)...
+go build -trimpath -ldflags "-s -w" -o "%SIMPRINT%\simprint.exe" .\cmd\simprint
+if errorlevel 1 (
+    popd
+    goto :error
+)
 popd
 
 echo.
@@ -67,6 +77,7 @@ echo   Entorno:  %CLIENTE%\.env
 echo   Servidor: %SERVER%\server.exe
 echo   Config:   %SERVER%\configs\server.yaml
 echo   Entorno:  %SERVER%\.env
+echo   Simprint: %SIMPRINT%\simprint.exe  (emulador fiscal con salida a termica)
 echo.
 echo Revise y personalice los archivos .env antes de ejecutar.
 exit /b 0

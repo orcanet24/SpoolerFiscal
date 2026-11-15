@@ -93,6 +93,11 @@ type tcpStream struct {
 	conn net.Conn
 }
 
+// WrapTCP envuelve una conexión aceptada con el stream de fiscal (deadline de
+// lectura + conversión de timeout a silencio), para puentes y servidores que
+// atienden el protocolo por TCP.
+func WrapTCP(conn net.Conn) frame.Stream { return &tcpStream{conn: conn} }
+
 // OpenTCP conecta con una impresora fiscal expuesta por TCP.
 func OpenTCP(address string, dialTimeout time.Duration) (frame.Stream, error) {
 	if dialTimeout <= 0 {
