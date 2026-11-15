@@ -16,6 +16,9 @@ var embeddedManual []byte
 //go:embed web/openapi.yaml
 var embeddedOpenAPI []byte
 
+//go:embed web/diccionario.html
+var embeddedDiccionario []byte
+
 // handleDocsRoot redirige la raíz y /help al manual.
 func (a *HTTPAPI) handleDocsRoot(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/docs", http.StatusFound)
@@ -27,6 +30,22 @@ func (a *HTTPAPI) handleDocsRoot(w http.ResponseWriter, r *http.Request) {
 func (a *HTTPAPI) handleDocs(w http.ResponseWriter, r *http.Request) {
 	body := embeddedManual
 	for _, path := range docCandidates("docs/manual.html") {
+		if b, err := os.ReadFile(path); err == nil && len(b) > 0 {
+			body = b
+			break
+		}
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(body)
+}
+
+// handleDiccionario sirve el diccionario navegable del código.
+func (a *HTTPAPI) handleDiccionario(w http.ResponseWriter, r *http.Request) {
+	body := embeddedDiccionario
+	for _, path := range docCandidates("docs/diccionario/index.html") {
 		if b, err := os.ReadFile(path); err == nil && len(b) > 0 {
 			body = b
 			break

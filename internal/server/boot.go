@@ -51,16 +51,16 @@ func NewRuntime(cfg config.Server, log *slog.Logger) (*Runtime, error) {
 	}
 
 	spooler := NewSpooler(printer, store, SpoolerConfig{
-		MaxPending:          cfg.Queue.MaxPending,
-		DefaultTimeout:      ms(cfg.Queue.DefaultTimeoutMS),
-		MaxTimeout:          ms(cfg.Queue.MaxTimeoutMS),
-		ProbeTimeout:        ms(cfg.Queue.ProbeTimeoutMS),
-		OpenRetry:           ms(cfg.Printer.OpenRetryMS),
-		DocumentLockTimeout: ms(cfg.Queue.DocumentLockTimeoutMS),
-		CorrelativeMaxAge:   ms(cfg.Queue.CorrelativeSyncMaxAgeMS),
+		MaxPending:            cfg.Queue.MaxPending,
+		DefaultTimeout:        ms(cfg.Queue.DefaultTimeoutMS),
+		MaxTimeout:            ms(cfg.Queue.MaxTimeoutMS),
+		ProbeTimeout:          ms(cfg.Queue.ProbeTimeoutMS),
+		OpenRetry:             ms(cfg.Printer.OpenRetryMS),
+		DocumentLockTimeout:   ms(cfg.Queue.DocumentLockTimeoutMS),
+		CorrelativeMaxAge:     ms(cfg.Queue.CorrelativeSyncMaxAgeMS),
 		AutoCloseOpenDocument: cfg.Queue.AutoCloseOpenDocument == nil || *cfg.Queue.AutoCloseOpenDocument,
-		LogCommands:         cfg.Database.LogCommands,
-		CommandTerminator:   cfg.Printer.CommandTerminator,
+		LogCommands:           cfg.Database.LogCommands,
+		CommandTerminator:     cfg.Printer.CommandTerminator,
 		Guard: GuardConfig{
 			BlockOnPaperOut:   cfg.Guard.BlockOnPaperOut,
 			BlockOnMemoryFull: cfg.Guard.BlockOnMemoryFull,
@@ -106,16 +106,16 @@ func NewRuntime(cfg config.Server, log *slog.Logger) (*Runtime, error) {
 	var httpLis net.Listener
 	if cfg.HTTP.Enabled {
 		httpAPI = NewHTTPAPI(HTTPConfig{
-			Token:           cfg.Token,
-			AllowedStations: cfg.AllowedStations,
-			Version:         Version,
-			Driver:          printer.Driver(),
-			MaxBodyBytes:    cfg.HTTP.MaxBodyBytes,
-			MaxLines:        500,
-			MaxLineBytes:    1024,
-			DefaultTimeout:  ms(cfg.Queue.DefaultTimeoutMS),
-			MaxTimeout:      ms(cfg.Queue.MaxTimeoutMS),
-			ProbeTimeout:    ms(cfg.Queue.ProbeTimeoutMS),
+			Token:             cfg.Token,
+			AllowedStations:   cfg.AllowedStations,
+			Version:           Version,
+			Driver:            printer.Driver(),
+			MaxBodyBytes:      cfg.HTTP.MaxBodyBytes,
+			MaxLines:          500,
+			MaxLineBytes:      1024,
+			DefaultTimeout:    ms(cfg.Queue.DefaultTimeoutMS),
+			MaxTimeout:        ms(cfg.Queue.MaxTimeoutMS),
+			ProbeTimeout:      ms(cfg.Queue.ProbeTimeoutMS),
 			JobResumeInterval: time.Duration(cfg.HTTP.JobResumeIntervalSeconds) * time.Second,
 		}, spooler, store, log)
 		httpLis, err = net.Listen("tcp", cfg.HTTP.Listen)

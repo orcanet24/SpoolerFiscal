@@ -177,6 +177,7 @@
     <li><a href="#problemas">7. Problemas frecuentes</a></li>
     <li><a href="#faq">8. Preguntas frecuentes</a></li>
     <li><a href="#referencias">9. Referencias</a></li>
+    <li><a href="/docs/diccionario">Diccionario del código</a></li>
   </ol>
 </nav>
 
@@ -1193,6 +1194,7 @@ Impresora: 0|Factura 6|Total: 20.00|Impreso:6</code></pre></div>
       <tr><td><code>docs\PROFITPLUS.md</code></td><td>Configuración de Profit Plus por versión.</td></tr>
       <tr><td><code>docs\DECISIONES.md</code></td><td>Por qué cada decisión técnica.</td></tr>
       <tr><td><code>examples\</code></td><td>Ejemplos ejecutables en seis lenguajes.</td></tr>
+      <tr><td><code>docs\diccionario\index.html</code></td><td>Diccionario navegable: árbol de archivos, funciones, tipos y llamadas entre funciones.</td></tr>
     </tbody>
   </table>
 
@@ -1201,8 +1203,11 @@ Impresora: 0|Factura 6|Total: 20.00|Impreso:6</code></pre></div>
     <li><code>http://servidor:8080/docs</code> — este manual, servido por el propio servidor.</li>
     <li><code>http://servidor:8080/help</code> — redirige al manual.</li>
     <li><code>http://servidor:8080/docs/openapi.yaml</code> — contrato OpenAPI.</li>
+    <li><code>http://servidor:8080/docs/diccionario</code> — diccionario del código: archivos, funciones y llamadas.</li>
     <li><code>server.exe -help</code> y <code>agent.exe -help</code> — ayuda de consola.</li>
   </ul>
+
+  <p>El diccionario se genera desde el propio código con <code>go run ./cmd/diccionario</code> y también se abre con doble clic en <code>docs\diccionario\index.html</code>. Es la mejor forma de seguir una función paso a paso mientras se aprende Go.</p>
 
   <div class="note"><strong>Antes de producción</strong> Cambie el token, active TLS si cruza red, abra sólo los puertos necesarios, pruebe una factura real, verifique el correlativo y programe el respaldo de <code>data\</code>.</div>
 </section>

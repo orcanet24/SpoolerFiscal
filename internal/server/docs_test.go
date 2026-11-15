@@ -37,6 +37,23 @@ func TestHTTPDocsIncludesEveryLanguage(t *testing.T) {
 	}
 }
 
+func TestHTTPDocsServesDiccionario(t *testing.T) {
+	srv, _, _, _ := testAPI(t, HTTPConfig{})
+	for _, path := range []string{"/docs/diccionario", "/docs/diccionario/", "/docs/diccionario/index.html"} {
+		resp, body := httpDo(t, srv, http.MethodGet, path, "", nil, nil)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("%s estado = %d", path, resp.StatusCode)
+		}
+		if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
+			t.Fatalf("%s Content-Type = %q", path, ct)
+		}
+		text := string(body)
+		if !strings.Contains(text, "Diccionario del código") || !strings.Contains(text, "</html>") {
+			t.Fatalf("%s no devolvió el diccionario (%d bytes)", path, len(body))
+		}
+	}
+}
+
 func TestHTTPDocsServesOpenAPI(t *testing.T) {
 	srv, _, _, _ := testAPI(t, HTTPConfig{})
 	resp, body := httpDo(t, srv, http.MethodGet, "/docs/openapi.yaml", "", nil, nil)

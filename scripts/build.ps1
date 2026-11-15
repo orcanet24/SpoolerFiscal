@@ -58,6 +58,10 @@ try {
     Copy-Item (Join-Path $Root "internal\server\web\manual.html") (Join-Path $Root "docs\manual.html") -Force
     Copy-Item (Join-Path $Root "api\openapi.yaml") (Join-Path $Root "internal\server\web\openapi.yaml") -Force
 
+    Write-Host "Generando diccionario del código..." -ForegroundColor Cyan
+    go run ./cmd/diccionario
+    if ($LASTEXITCODE -ne 0) { throw "Falló la generación del diccionario del código" }
+
     $strip = @()
     if (-not $NoStrip) { $strip = @("-s", "-w") }
 

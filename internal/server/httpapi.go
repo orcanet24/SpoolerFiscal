@@ -101,6 +101,9 @@ func (a *HTTPAPI) Handler() http.Handler {
 	mux.HandleFunc("GET /docs/{$}", a.handleDocs)
 	mux.HandleFunc("GET /docs/manual.html", a.handleDocs)
 	mux.HandleFunc("GET /docs/openapi.yaml", a.handleOpenAPI)
+	mux.HandleFunc("GET /docs/diccionario", a.handleDiccionario)
+	mux.HandleFunc("GET /docs/diccionario/{$}", a.handleDiccionario)
+	mux.HandleFunc("GET /docs/diccionario/index.html", a.handleDiccionario)
 
 	mux.HandleFunc("GET /v1/health", a.handleHealth)
 	mux.HandleFunc("GET /v1/status", a.auth(a.handleStatus))
@@ -316,9 +319,9 @@ func jobSummaryJSONOf(j *PrintJob) jobSummaryJSON {
 
 type jobDetailJSON struct {
 	jobSummaryJSON
-	ClientRef  string          `json:"client_ref,omitempty"`
-	LinesRaw   []string        `json:"lines_raw,omitempty"`
-	Result     json.RawMessage `json:"result,omitempty"`
+	ClientRef string          `json:"client_ref,omitempty"`
+	LinesRaw  []string        `json:"lines_raw,omitempty"`
+	Result    json.RawMessage `json:"result,omitempty"`
 }
 
 func jobDetailJSONOf(j *PrintJob) jobDetailJSON {

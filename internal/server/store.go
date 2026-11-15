@@ -463,21 +463,21 @@ const (
 
 // PrintJob es una factura REST persistida: la fuente de verdad de la cola.
 type PrintJob struct {
-	ID          string           `json:"id"`
-	Station     string           `json:"station"`
-	Session     string           `json:"session"`
-	IdemKey     string           `json:"-"`
-	RequestHash string           `json:"-"`
-	ClientRef   string           `json:"client_ref,omitempty"`
-	Mode        string           `json:"-"` // sync | async
-	Lines       []string         `json:"-"`
-	Cursor      int              `json:"cursor"`
-	Status      string           `json:"status"`
-	Result      []byte           `json:"-"`
-	Attempts    int              `json:"attempts"`
-	LastError   string           `json:"last_error,omitempty"`
-	CreatedAt   time.Time        `json:"created_at"`
-	UpdatedAt   time.Time        `json:"updated_at"`
+	ID          string    `json:"id"`
+	Station     string    `json:"station"`
+	Session     string    `json:"session"`
+	IdemKey     string    `json:"-"`
+	RequestHash string    `json:"-"`
+	ClientRef   string    `json:"client_ref,omitempty"`
+	Mode        string    `json:"-"` // sync | async
+	Lines       []string  `json:"-"`
+	Cursor      int       `json:"cursor"`
+	Status      string    `json:"status"`
+	Result      []byte    `json:"-"`
+	Attempts    int       `json:"attempts"`
+	LastError   string    `json:"last_error,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 // ErrJobNotFound indica que el identificador no existe.

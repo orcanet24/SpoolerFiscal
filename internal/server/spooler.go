@@ -168,12 +168,12 @@ type Spooler struct {
 	// Se maneja bajo schedMu porque el planificador decide con ella.
 	correlativeAt time.Time
 
-	mu           sync.RWMutex
-	status       fiscal.Status
-	info         fiscal.Info
-	history      History
-	correlative  map[string]int64
-	syncPending  atomic.Bool
+	mu          sync.RWMutex
+	status      fiscal.Status
+	info        fiscal.Info
+	history     History
+	correlative map[string]int64
+	syncPending atomic.Bool
 
 	cDocuments    atomic.Uint64
 	cCommands     atomic.Uint64

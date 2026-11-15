@@ -24,6 +24,7 @@ tags:
   - name: estado
   - name: documentos
   - name: emisión
+  - name: trabajos
 paths:
   /v1/health:
     get:
@@ -147,9 +148,21 @@ paths:
         las líneas.
 
         Envíe `Idempotency-Key`: un reintento devuelve la respuesta original y
-        **no** vuelve a imprimir.
+        **no** vuelve a imprimir. Si la factura quedó pausada en la cola (papel
+        agotado, impresora caída) el reintento ve el trabajo activo en 202 hasta
+        que el despachador la complete, y entonces repara la respuesta a 201.
+
+        Cada factura es un **trabajo duradero** persistido en la base del
+        spooler (`print_jobs`): si la impresora falla antes de imprimir nada el
+        trabajo queda `paused` y se reanuda solo; si falló a mitad, se aborta
+        con cierre de recuperación (101) y exige re-sometido (502
+        `invoice_aborted` con `job_id`).
+
+        Modo asíncrono: `?async=1` o encabezado `X-Async: true` devuelve 202 con
+        `job_id` de inmediato; consulte `/v1/jobs/{id}` por el resultado.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/AsyncMode"
       requestBody:
         required: true
         content:
@@ -172,11 +185,19 @@ paths:
           content:
             application/json:
               schema: {$ref: "#/components/schemas/InvoiceResponse"}
+        "202":
+          description: |
+            Aceptado sin esperar la impresión: modo asíncrono (`?async=1`) o
+            reintento con la clave de un trabajo aún activo.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/JobAccepted"}
         "400": {$ref: "#/components/responses/BadRequest"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "409": {$ref: "#/components/responses/Conflict"}
         "429": {$ref: "#/components/responses/QueueFull"}
+        "502": {$ref: "#/components/responses/InvoiceAborted"}
         "503": {$ref: "#/components/responses/PrinterUnavailable"}
         "504": {$ref: "#/components/responses/Timeout"}
   /v1/invoices/structured:
@@ -197,6 +218,7 @@ paths:
         `/v1/commands` con los comandos del protocolo.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/AsyncMode"
       requestBody:
         required: true
         content:
@@ -226,8 +248,64 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "409": {$ref: "#/components/responses/Conflict"}
         "429": {$ref: "#/components/responses/QueueFull"}
+        "502": {$ref: "#/components/responses/InvoiceAborted"}
         "503": {$ref: "#/components/responses/PrinterUnavailable"}
         "504": {$ref: "#/components/responses/Timeout"}
+  /v1/jobs:
+    get:
+      tags: [trabajos]
+      summary: Cola duradera de facturas REST (más reciente primero)
+      description: |
+        Cada factura REST es un trabajo persistido. Use este listado para
+        conciliar sus pedidos con lo impreso: `paused` significa que se
+        reanudará solo cuando la impresora vuelva; `aborted` exige re-someter
+        la factura (nunca se reimprime a mitad).
+      parameters:
+        - name: status
+          in: query
+          required: false
+          description: Filtra por estado del trabajo.
+          schema: {type: string, enum: [queued, printing, paused, aborted, done, canceled]}
+        - name: limit
+          in: query
+          required: false
+          schema: {type: integer, minimum: 1, maximum: 200, default: 50}
+      responses:
+        "200":
+          description: Trabajos
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count: {type: integer}
+                  jobs:
+                    type: array
+                    items: {$ref: "#/components/schemas/JobSummary"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+  /v1/jobs/{id}:
+    get:
+      tags: [trabajos]
+      summary: Detalle y resultado de un trabajo
+      description: |
+        `result` contiene la respuesta completa de la factura (el mismo cuerpo
+        del 201) cuando el trabajo terminó `done`. Para un trabajo `paused`
+        no hay resultado aún: reintentar la factura original con su
+        Idempotency-Key repara la respuesta cuando se complete.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string}
+          example: job_9af1c2ab34de
+      responses:
+        "200":
+          description: Trabajo
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/JobDetail"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
 components:
   securitySchemes:
     bearerAuth:
@@ -245,6 +323,16 @@ components:
         respuesta guardada; con otro cuerpo responde 409.
       schema: {type: string, maxLength: 128}
       example: pedido-1001
+    AsyncMode:
+      name: async (query) / X-Async (header)
+      in: header
+      required: false
+      description: |
+        Modo asíncrono: active con `?async=1` en la URL o con el encabezado
+        `X-Async: true`. El servidor acepta la factura (202 con `job_id`) y el
+        despachador la imprime; el cliente consulta `/v1/jobs/{id}`. Sin modo
+        asíncrono la petición espera la impresión completa.
+      schema: {type: boolean, default: false}
   responses:
     BadRequest:
       description: Petición inválida
@@ -289,6 +377,20 @@ components:
       content:
         application/json:
           schema: {$ref: "#/components/schemas/Error"}
+    InvoiceAborted:
+      description: |
+        Factura abortada a mitad (`invoice_aborted`): parte de las líneas llegó
+        a papel, el spooler envió el cierre de recuperación (101) y el trabajo
+        quedó `aborted`. Re-someta la factura completa; con Idempotency-Key el
+        integrador puede registrar el aborto por clave.
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/Error"}
+    NotFound:
+      description: Trabajo no encontrado
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/Error"}
   schemas:
     InvoiceRequest:
       type: object
@@ -326,6 +428,10 @@ components:
           description: client_ref original del pedido (o la Idempotency-Key), sin el sufijo #índice de cada línea.
           example: pedido-1001
         completed: {type: boolean}
+        job_id:
+          type: string
+          description: Identificador del trabajo duradero asociado; consulte /v1/jobs/{id}.
+          example: job_9af1c2ab34de
         invoice_number: {type: integer, format: int64}
         document_type: {type: string, example: invoice}
         sequence: {type: integer, format: int64}
@@ -476,6 +582,50 @@ components:
               description: Líneas TFHKA generadas, incluido el cierre `101`.
               items: {type: string}
             totals: {$ref: "#/components/schemas/InvoiceTotals"}
+    JobAccepted:
+      type: object
+      description: Respuesta 202 del modo asíncrono o de un reintento con trabajo activo.
+      properties:
+        job_id: {type: string, example: job_9af1c2ab34de}
+        status:
+          type: string
+          enum: [queued, printing, paused]
+          description: Estado del trabajo en el momento de la consulta.
+        station: {type: string, example: ECOM-01}
+        lines: {type: integer, description: Cantidad de líneas fiscales del trabajo.}
+    JobSummary:
+      type: object
+      properties:
+        job_id: {type: string}
+        station: {type: string}
+        status:
+          type: string
+          enum: [queued, printing, paused, aborted, done, canceled]
+          description: |
+            queued: aceptado; printing: en ejecución; paused: detenido por un
+            impedimento transitorio (papel, offline) y reanudable; aborted:
+            parcialmente impreso, exige re-sometido; done: completo.
+        cursor:
+          type: integer
+          description: Líneas ya impresas (avance dentro de la factura).
+        lines: {type: integer}
+        attempts: {type: integer}
+        last_error: {type: string}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    JobDetail:
+      allOf:
+        - $ref: "#/components/schemas/JobSummary"
+        - type: object
+          properties:
+            client_ref: {type: string}
+            lines_raw:
+              type: array
+              description: Líneas TFHKA del trabajo tal como fueron enviadas.
+              items: {type: string}
+            result:
+              type: object
+              description: Respuesta completa de la factura cuando status = done (cuerpo del 201).
     Error:
       type: object
       properties:
@@ -500,7 +650,12 @@ components:
                 - unsupported_media_type
                 - printer_error
                 - internal_error
+                - invoice_aborted
+                - not_found
             message: {type: string}
+            job_id:
+              type: string
+              description: Trabajo duradero asociado al error (factura pausada o abortada).
             line_index:
               type: integer
               description: Línea que falló cuando el error ocurrió a mitad de factura.

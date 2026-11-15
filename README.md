@@ -397,6 +397,9 @@ protocolo en [TFHKA](docs/PROTOCOLO_TFHKA.md).
 - [API REST: referencia y ejemplos adicionales](docs/API.md)
 - [Manual HTML completo](docs/manual.html) — también se sirve en
   `/docs` cuando la API está activa
+- [Diccionario del código](docs/diccionario/index.html): árbol de archivos,
+  funciones, tipos y llamadas entre funciones. Se regenera con
+  `go run ./cmd/diccionario` y se sirve en `/docs/diccionario`
 - [Instalación](docs/INSTALACION.md)
 - [Operación y diagnóstico](docs/OPERACION.md)
 - [Configuración de Profit Plus](docs/PROFITPLUS.md)
@@ -411,6 +414,8 @@ protocolo en [TFHKA](docs/PROTOCOLO_TFHKA.md).
 go test ./...
 .\scripts\build.ps1
 ```
+
+`scripts/build.ps1` regenera el diccionario del código antes de compilar.
 
 Las pruebas unitarias no requieren una impresora fiscal real. Las pruebas
 end-to-end contra un emulador externo son opcionales; ver las instrucciones en

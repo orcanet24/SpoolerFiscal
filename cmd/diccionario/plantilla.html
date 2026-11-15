@@ -1,0 +1,473 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Diccionario del código · Spooler Fiscal</title>
+<style>
+  :root{
+    --bg:#f4f6f8; --panel:#ffffff; --ink:#16202c; --muted:#5d6b7a;
+    --line:#dde3ea; --accent:#1f6feb; --accent-soft:#e9f1fe;
+    --ok:#0f7b4f; --ok-soft:#e6f4ee; --warn:#8a5a00; --warn-soft:#fdf3dd;
+    --code:#0f172a; --radius:10px;
+    --mono:"Cascadia Mono","Consolas","SFMono-Regular",ui-monospace,monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{background:var(--bg);color:var(--ink);font:15px/1.55 "Segoe UI",system-ui,-apple-system,sans-serif}
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+  code,.mono{font-family:var(--mono);font-size:.86em}
+  header.top{background:#0f172a;color:#e8eef7;padding:14px 22px;display:flex;flex-wrap:wrap;gap:14px;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:20}
+  .brand{font-size:17px;font-weight:600;letter-spacing:.2px}
+  .brand span{display:block;font-size:12px;font-weight:400;color:#9fb0c6;letter-spacing:.4px;text-transform:uppercase}
+  .stats{display:flex;gap:18px;flex-wrap:wrap;font-size:12px;color:#b9c7da}
+  .stats b{display:block;font-size:18px;color:#fff;font-weight:600}
+  .layout{display:flex;min-height:calc(100vh - 62px);align-items:flex-start}
+  aside{width:330px;flex:0 0 330px;background:var(--panel);border-right:1px solid var(--line);position:sticky;top:62px;max-height:calc(100vh - 62px);display:flex;flex-direction:column}
+  .buscador{padding:12px;border-bottom:1px solid var(--line)}
+  .buscador input{width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:8px;font:inherit;background:#fbfcfd}
+  .buscador input:focus{outline:2px solid var(--accent-soft);border-color:var(--accent)}
+  .pista{font-size:11px;color:var(--muted);margin-top:6px}
+  .resultados{display:none;overflow:auto;padding:6px}
+  .resultados.visible{display:block}
+  .resultados .hit{display:block;padding:7px 9px;border-radius:8px;color:var(--ink)}
+  .resultados .hit:hover{background:var(--accent-soft);text-decoration:none}
+  .hit .tipo{font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-right:6px}
+  .hit .ruta{display:block;font-size:11px;color:var(--muted);font-family:var(--mono)}
+  .arbol{overflow:auto;padding:8px 6px 24px;font-size:13.5px}
+  .arbol details{margin:1px 0}
+  .arbol summary{cursor:pointer;padding:4px 8px;border-radius:6px;color:var(--muted);font-weight:600;list-style:none}
+  .arbol summary::-webkit-details-marker{display:none}
+  .arbol summary::before{content:"▸";display:inline-block;width:14px;color:#9aa7b5}
+  .arbol details[open]>summary::before{content:"▾"}
+  .arbol summary:hover{background:#f1f4f8}
+  .arbol .arch{display:flex;justify-content:space-between;gap:8px;padding:4px 8px 4px 26px;border-radius:6px;color:var(--ink);font-family:var(--mono);font-size:12.5px}
+  .arbol .arch:hover{background:var(--accent-soft);text-decoration:none}
+  .arbol .arch.activo{background:var(--accent-soft);color:var(--accent);font-weight:600}
+  .cuenta{color:var(--muted);font-size:11px;font-family:var(--mono);flex:0 0 auto}
+  main{flex:1;min-width:0;padding:26px 34px 60px;max-width:1100px}
+  .miga{font-size:12px;color:var(--muted);font-family:var(--mono);margin-bottom:8px}
+  h1{font-size:26px;line-height:1.2;margin:0 0 6px;letter-spacing:-.3px;word-break:break-word}
+  h2{font-size:18px;margin:28px 0 10px}
+  h3{font-size:15px;margin:0 0 6px}
+  .sub{color:var(--muted);font-size:13px}
+  .tarjeta{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:18px 20px;margin:14px 0;box-shadow:0 1px 2px rgba(15,23,42,.04)}
+  .tarjeta.funcion{padding:0;overflow:hidden}
+  .tarjeta.funcion>summary{padding:13px 18px;cursor:pointer;list-style:none;display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}
+  .tarjeta.funcion>summary::-webkit-details-marker{display:none}
+  .tarjeta.funcion>summary:hover{background:#fafcff}
+  .tarjeta.funcion>summary .flecha{color:#9aa7b5;font-size:11px}
+  .tarjeta.funcion[open]>summary .flecha{transform:rotate(90deg)}
+  .cuerpo{padding:0 18px 16px;border-top:1px solid var(--line)}
+  .firma{background:var(--code);color:#dbe6f6;border-radius:8px;padding:10px 12px;overflow:auto;font-family:var(--mono);font-size:12.5px;white-space:pre;margin:12px 0}
+  .explicacion{white-space:pre-line;background:#f8fafc;border-left:3px solid var(--accent);padding:10px 12px;border-radius:0 8px 8px 0;margin:10px 0}
+  .etiquetas{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
+  .badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;border:1px solid var(--line);background:#f7f9fb;color:var(--muted)}
+  .badge.export{background:var(--ok-soft);border-color:#bfe3d3;color:var(--ok)}
+  .badge.recv{background:var(--accent-soft);border-color:#c9dcfb;color:var(--accent)}
+  .badge.rasgo{background:var(--warn-soft);border-color:#eddcae;color:var(--warn);cursor:help}
+  .chips{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 2px}
+  .chip{display:inline-block;padding:3px 9px;border-radius:7px;border:1px solid #cfd9e6;background:#fff;font-family:var(--mono);font-size:11.5px;color:#27405e}
+  .chip:hover{background:var(--accent-soft);border-color:var(--accent);text-decoration:none}
+  .bloque{margin:14px 0}
+  .bloque .titulo{font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);margin-bottom:5px;font-weight:700}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted)}
+  td code{word-break:break-word}
+  .vacio{color:var(--muted);font-style:italic}
+  .rejilla{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+  .dato{background:#f8fafc;border:1px solid var(--line);border-radius:8px;padding:10px 12px}
+  .dato b{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted);margin-bottom:4px}
+  .paquete{border:1px solid var(--line);border-radius:8px;padding:12px 14px;background:#fbfcfe}
+  .paquete h3{margin:0 0 4px;font-family:var(--mono);font-size:14px}
+  .paquete .lista{font-size:12px;color:var(--muted);font-family:var(--mono);line-height:1.7}
+  .leyenda dt{font-family:var(--mono);font-weight:600;color:var(--accent);margin-top:8px}
+  .leyenda dd{margin:0 0 2px;color:var(--muted);font-size:13px}
+  footer{padding:16px 34px;border-top:1px solid var(--line);color:var(--muted);font-size:12px;background:var(--panel)}
+  .aviso{background:var(--warn-soft);border:1px solid #eddcae;color:#6b4a00;border-radius:8px;padding:10px 12px;font-size:13px}
+  @media (max-width:860px){
+    .layout{flex-direction:column}
+    aside{width:100%;flex:1 1 auto;position:static;max-height:46vh;border-right:0;border-bottom:1px solid var(--line)}
+    main{padding:18px}
+    header.top{gap:8px}
+    .stats{gap:12px}
+  }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="brand">Diccionario del código<span>Spooler Fiscal · Go</span></div>
+  <div class="stats" id="stats"></div>
+</header>
+
+<div class="layout">
+  <aside>
+    <div class="buscador">
+      <input id="q" type="search" placeholder="Buscar archivo, función o tipo…" autocomplete="off" aria-label="Buscar">
+      <div class="pista">Escriba para filtrar todo el proyecto. <kbd>Esc</kbd> limpia.</div>
+    </div>
+    <div class="resultados" id="resultados"></div>
+    <nav class="arbol" id="arbol" aria-label="Árbol de archivos"></nav>
+  </aside>
+  <main id="vista"></main>
+</div>
+
+<footer>
+  Generado automáticamente desde el AST de Go el __GENERADO__ · <span id="pie"></span>
+</footer>
+
+<script id="datos" type="application/json">__DATOS__</script>
+<script>
+(function () {
+  "use strict";
+
+  var D = JSON.parse(document.getElementById("datos").textContent);
+  var simbolos = D.simbolos || {};
+  var archivos = D.archivos || [];
+  var porRuta = {};
+  var fnPorId = {};
+  var tipoPorId = {};
+
+  archivos.forEach(function (a) {
+    porRuta[a.ruta] = a;
+    (a.funciones || []).forEach(function (f) { fnPorId[f.id] = { fn: f, archivo: a }; });
+    (a.tipos || []).forEach(function (t) { tipoPorId[t.id] = { tipo: t, archivo: a }; });
+  });
+
+  var RASGOS = {
+    goroutine: "Lanza trabajo en paralelo con la instrucción go.",
+    defer: "Aplaza una limpieza para que se ejecute al salir.",
+    canales: "Comunica goroutines mediante canales.",
+    select: "Espera a varios canales con select.",
+    contexto: "Recibe context.Context: puede cancelarse o tener plazo.",
+    error: "Devuelve un error que el llamador debe comprobar.",
+    mutex: "Protege estado compartido con un candado (mutex).",
+    "type-assertion": "Comprueba el tipo dinámico de un valor.",
+    hoja: "No llama a otras funciones del proyecto."
+  };
+
+  var LEYENDA = [
+    ["func", "Declara una función. Si lleva paréntesis antes del nombre, es un método de un tipo."],
+    ["struct", "Agrupa campos con nombre y tipo. Es el equivalente a un registro."],
+    ["interface", "Contrato: lista de métodos que un tipo debe implementar."],
+    ["método", "Función asociada a un tipo; se llama valor.Metodo()."],
+    ["*Tipo", "Puntero: la función puede modificar el valor original."],
+    ["error", "Segundo valor típico de retorno en Go: nil si todo fue bien."],
+    ["context.Context", "Transporta cancelación y plazos entre llamadas."],
+    ["sync.Mutex", "Candado para que dos goroutines no toquen el mismo dato a la vez."],
+    ["go", "Arranca una goroutine: ejecución concurrente."],
+    ["defer", "Registra una llamada para el final de la función (cerrar archivos, desbloquear)."],
+    ["<- / chan", "Canales: envío y recepción de valores entre goroutines."],
+    ["Exportada", "Empieza por mayúscula: visible desde otros paquetes."]
+  ];
+
+  function esc(s) {
+    return String(s == null ? "" : s)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+  }
+
+  function corto(id) {
+    var p = String(id).split(".");
+    if (p.length >= 3) return p[p.length - 2] + "." + p[p.length - 1];
+    if (p.length === 2) return p[1];
+    return id;
+  }
+
+  function nombrePaq(ruta) {
+    var p = String(ruta || "").split("/");
+    return p[p.length - 1] || ruta;
+  }
+
+  function enlaceSimbolo(id, texto) {
+    if (!simbolos[id] && !fnPorId[id] && !tipoPorId[id]) {
+      return '<span class="chip">' + esc(texto || corto(id)) + "</span>";
+    }
+    return '<a class="chip" href="#/simbolo/' + encodeURIComponent(id) + '">' + esc(texto || corto(id)) + "</a>";
+  }
+
+  function enlaceArchivo(ruta, texto) {
+    return '<a href="#/archivo/' + encodeURIComponent(ruta) + '">' + esc(texto || ruta) + "</a>";
+  }
+
+  function chips(ids) {
+    if (!ids || !ids.length) return '<span class="vacio">ninguna</span>';
+    return '<div class="chips">' + ids.map(function (id) { return enlaceSimbolo(id); }).join("") + "</div>";
+  }
+
+  function badgeRasgo(r) {
+    return '<span class="badge rasgo" title="' + esc(RASGOS[r] || r) + '">' + esc(r) + "</span>";
+  }
+
+  /* ---------- estadísticas y pie ---------- */
+  var s = D.stats || {};
+  document.getElementById("stats").innerHTML =
+    "<div><b>" + (s.archivos || 0) + "</b>archivos</div>" +
+    "<div><b>" + (s.funciones || 0) + "</b>funciones</div>" +
+    "<div><b>" + (s.metodos || 0) + "</b>métodos</div>" +
+    "<div><b>" + (s.tipos || 0) + "</b>tipos</div>" +
+    "<div><b>" + (s.lineas || 0).toLocaleString("es") + "</b>líneas</div>";
+  document.getElementById("pie").textContent = (s.paquetes || 0) + " paquetes · " + D.modulo;
+
+  /* ---------- árbol ---------- */
+  var raiz = { hijos: {}, archivos: [] };
+  archivos.forEach(function (a) {
+    var partes = a.ruta.split("/");
+    var n = raiz;
+    for (var i = 0; i < partes.length - 1; i++) {
+      if (!n.hijos[partes[i]]) n.hijos[partes[i]] = { hijos: {}, archivos: [] };
+      n = n.hijos[partes[i]];
+    }
+    n.archivos.push(a);
+  });
+
+  function contar(n) {
+    var c = n.archivos.length;
+    Object.keys(n.hijos).forEach(function (k) { c += contar(n.hijos[k]); });
+    return c;
+  }
+
+  function pintarNodo(n, nivel) {
+    var html = "";
+    Object.keys(n.hijos).sort().forEach(function (nombre) {
+      var h = n.hijos[nombre];
+      html += "<details" + (nivel < 1 ? " open" : "") + "><summary>" + esc(nombre) +
+        ' <span class="cuenta">' + contar(h) + "</span></summary>" + pintarNodo(h, nivel + 1) + "</details>";
+    });
+    n.archivos.sort(function (a, b) { return a.ruta.localeCompare(b.ruta); }).forEach(function (a) {
+      var nombre = a.ruta.split("/").pop();
+      html += '<a class="arch" data-ruta="' + esc(a.ruta) + '" href="#/archivo/' +
+        encodeURIComponent(a.ruta) + '"><span>' + esc(nombre) + '</span><span class="cuenta">' +
+        (a.funciones || []).length + "</span></a>";
+    });
+    return html;
+  }
+  document.getElementById("arbol").innerHTML = pintarNodo(raiz, 0);
+
+  function marcarActivo(ruta) {
+    Array.prototype.forEach.call(document.querySelectorAll(".arbol .arch"), function (el) {
+      el.classList.toggle("activo", el.getAttribute("data-ruta") === ruta);
+    });
+  }
+
+  /* ---------- fichas ---------- */
+  function fichaFuncion(f, abierta) {
+    var rasgos = (f.rasgos || []).map(badgeRasgo).join("");
+    var notas = (f.notas || []).length
+      ? '<div class="bloque"><div class="titulo">Notas del código</div><ul>' +
+        f.notas.map(function (n) { return "<li>" + esc(n) + "</li>"; }).join("") + "</ul></div>"
+      : "";
+    var doc = f.doc ? '<p class="sub">' + esc(f.doc) + "</p>" : "";
+    return '<details class="tarjeta funcion"' + (abierta ? " open" : "") + ">" +
+      "<summary><span class=\"flecha\">▶</span><h3>" + esc(f.nombre) + "</h3>" +
+      (f.receptor ? '<span class="badge recv">' + esc(f.receptor) + "</span>" : "") +
+      (f.exportada ? '<span class="badge export">exportada</span>' : "") +
+      '<span class="cuenta">línea ' + f.linea + "</span></summary>" +
+      '<div class="cuerpo">' + doc +
+      '<div class="firma">' + esc(f.firma) + "</div>" +
+      '<div class="explicacion">' + esc(f.explicacion) + "</div>" +
+      (rasgos ? '<div class="etiquetas">' + rasgos + "</div>" : "") +
+      notas +
+      '<div class="bloque"><div class="titulo">Llama a</div>' + chips(f.llamadas) + "</div>" +
+      '<div class="bloque"><div class="titulo">Es llamada desde</div>' + chips(f.llamado_por) + "</div>" +
+      "</div></details>";
+  }
+
+  function fichaTipo(t) {
+    var campos = (t.campos || []).length
+      ? "<table><thead><tr><th>Nombre</th><th>Tipo</th><th>Comentario</th></tr></thead><tbody>" +
+        t.campos.map(function (c) {
+          return "<tr><td><code>" + esc(c.nombre) + "</code></td><td><code>" + esc(c.tipo) +
+            "</code></td><td>" + esc(c.doc || "") + "</td></tr>";
+        }).join("") + "</tbody></table>"
+      : '<p class="vacio">Sin campos declarados.</p>';
+    var metodos = (t.metodos || []).length
+      ? '<div class="bloque"><div class="titulo">Métodos</div>' + chips(t.metodos) + "</div>"
+      : "";
+    return '<div class="tarjeta"><h3>' + esc(t.nombre) + ' <span class="badge">' + esc(t.clase) +
+      "</span></h3>" + (t.doc ? '<p class="sub">' + esc(t.doc) + "</p>" : "") + campos + metodos + "</div>";
+  }
+
+  function pintarFunciones(lista) {
+    if (!lista || !lista.length) return '<p class="vacio">Este archivo no declara funciones.</p>';
+    return lista.map(function (f) { return fichaFuncion(f, false); }).join("");
+  }
+
+  function renderArchivo(ruta) {
+    var a = porRuta[ruta];
+    if (!a) {
+      document.getElementById("vista").innerHTML = '<div class="tarjeta"><h1>Archivo no encontrado</h1><p>' +
+        esc(ruta) + "</p></div>";
+      return;
+    }
+    marcarActivo(ruta);
+    document.title = ruta + " · Diccionario";
+    var imports = (a.imports || []).length
+      ? "<table><thead><tr><th>Alias</th><th>Ruta</th><th>Origen</th></tr></thead><tbody>" +
+        a.imports.map(function (i) {
+          return "<tr><td><code>" + esc(i.alias) + "</code></td><td><code>" + esc(i.ruta) +
+            '</code></td><td>' + (i.interno ? '<span class="badge export">interno</span>' : '<span class="badge">externo</span>') + "</td></tr>";
+        }).join("") + "</tbody></table>"
+      : '<p class="vacio">Sin imports.</p>';
+
+    var consts = (a.constantes || []).length
+      ? "<table><thead><tr><th>Nombre</th><th>Tipo</th><th>Valor</th><th>Comentario</th></tr></thead><tbody>" +
+        a.constantes.map(function (c) {
+          return "<tr><td><code>" + esc(c.nombre) + "</code></td><td><code>" + esc(c.tipo || "") +
+            "</code></td><td><code>" + esc(c.valor || "") + "</code></td><td>" + esc(c.doc || "") + "</td></tr>";
+        }).join("") + "</tbody></table>"
+      : "";
+
+    var vars = (a.variables || []).length
+      ? "<table><thead><tr><th>Nombre</th><th>Tipo</th><th>Comentario</th></tr></thead><tbody>" +
+        a.variables.map(function (v) {
+          return "<tr><td><code>" + esc(v.nombre) + "</code></td><td><code>" + esc(v.tipo || "") +
+            "</code></td><td>" + esc(v.doc || "") + "</td></tr>";
+        }).join("") + "</tbody></table>"
+      : "";
+
+    var depende = (a.depende_de || []).length
+      ? a.depende_de.map(function (p) { return '<span class="chip" title="' + esc(p) + '">' + esc(nombrePaq(p)) + "</span>"; }).join("")
+      : '<span class="vacio">solo biblioteca estándar</span>';
+    var usado = (a.usado_por || []).length
+      ? a.usado_por.map(function (p) { return '<span class="chip" title="' + esc(p) + '">' + esc(nombrePaq(p)) + "</span>"; }).join("")
+      : '<span class="vacio">ninguno</span>';
+
+    document.getElementById("vista").innerHTML =
+      '<div class="miga">' + esc(a.ruta) + "</div>" +
+      "<h1>" + esc(a.ruta.split("/").pop()) + "</h1>" +
+      '<p class="sub">Paquete <code>' + esc(a.paquete) + "</code> · " + a.lineas + " líneas · " +
+      (a.funciones || []).length + " funciones · " + (a.tipos || []).length + " tipos</p>" +
+      (a.doc ? '<div class="tarjeta"><div class="explicacion">' + esc(a.doc) + "</div></div>" : "") +
+      '<div class="rejilla">' +
+      '<div class="dato"><b>Depende de</b><div class="chips">' + depende + "</div></div>" +
+      '<div class="dato"><b>Usado por</b><div class="chips">' + usado + "</div></div>" +
+      "</div>" +
+      "<h2>Funciones y métodos</h2>" + pintarFunciones(a.funciones) +
+      ((a.tipos || []).length ? "<h2>Tipos</h2>" + a.tipos.map(fichaTipo).join("") : "") +
+      ((a.constantes || []).length ? "<h2>Constantes</h2>" + consts : "") +
+      ((a.variables || []).length ? "<h2>Variables de paquete</h2>" + vars : "") +
+      "<h2>Imports</h2>" + imports;
+  }
+
+  function renderSimbolo(id) {
+    var f = fnPorId[id];
+    var t = tipoPorId[id];
+    if (!f && !t) {
+      var s = simbolos[id];
+      if (s) {
+        document.getElementById("vista").innerHTML = '<div class="miga">' + esc(s.paquete) + " · " +
+          esc(s.archivo) + "</div><h1>" + esc(s.nombre) + '</h1><p class="sub">' + esc(s.tipo) +
+          ", línea " + s.linea + " · " + enlaceArchivo(s.archivo) + "</p>";
+        marcarActivo(s.archivo);
+        return;
+      }
+      document.getElementById("vista").innerHTML = '<div class="tarjeta"><h1>Símbolo no encontrado</h1><p>' + esc(id) + "</p></div>";
+      return;
+    }
+    var archivo = f ? f.archivo : t.archivo;
+    marcarActivo(archivo.ruta);
+    document.title = corto(id) + " · Diccionario";
+    var cuerpo = f ? fichaFuncion(f.fn, true) : fichaTipo(t.tipo);
+    document.getElementById("vista").innerHTML =
+      '<div class="miga">' + enlaceArchivo(archivo.ruta) + " › " + esc(corto(id)) + "</div>" +
+      "<h1>" + esc(corto(id)) + "</h1>" +
+      '<p class="sub">' + esc(simbolos[id] ? simbolos[id].tipo : "") + " del paquete <code>" +
+      esc(archivo.paquete) + "</code> · archivo " + enlaceArchivo(archivo.ruta) + "</p>" +
+      cuerpo +
+      '<div class="bloque"><a class="chip" href="#/archivo/' + encodeURIComponent(archivo.ruta) +
+      '">Ver el archivo completo</a></div>';
+  }
+
+  function renderHome() {
+    document.title = "Diccionario del código · Spooler Fiscal";
+    marcarActivo(null);
+    var paquetes = (D.paquetes || []).map(function (p) {
+      return '<div class="paquete"><h3>' + esc(p.nombre) + '</h3><div class="sub">' +
+        esc(String(p.ruta || "").replace(D.modulo + "/", "")) + " · " + p.lineas +
+        " líneas · " + p.archivos.length + ' archivos</div><div class="lista">' +
+        p.archivos.map(function (r) { return enlaceArchivo(r, r.split("/").pop()); }).join("<br>") +
+        "</div></div>";
+    }).join("");
+    var leyenda = LEYENDA.map(function (x) {
+      return "<dt>" + esc(x[0]) + "</dt><dd>" + esc(x[1]) + "</dd>";
+    }).join("");
+    document.getElementById("vista").innerHTML =
+      '<div class="miga">Inicio</div><h1>Diccionario del código</h1>' +
+      '<p class="sub">Mapa navegable del proyecto: cada archivo, sus funciones, los tipos que define y a qué llama cada una. Se regenera desde el código fuente, así que siempre refleja la versión actual.</p>' +
+      '<div class="tarjeta"><h2 style="margin-top:0">Cómo leerlo</h2>' +
+      "<p>El panel izquierdo es el árbol real de <code>cmd/</code> e <code>internal/</code>. Al abrir un archivo verá su propósito, sus imports, sus tipos y una ficha por función con la firma, una explicación, las notas que el propio código tiene dentro y dos listas: <b>Llama a</b> y <b>Es llamada desde</b>. Los nombres son enlaces: siguiéndolos se recorre el programa de función en función.</p>" +
+      '<p class="sub">Consejo: empiece por <code>cmd/server/main.go</code>, siga a <code>servicehost</code>, luego a <code>boot</code> y desde ahí a <code>spooler.Submit</code>.</p></div>' +
+      '<div class="rejilla">' + paquetes + "</div>" +
+      '<div class="tarjeta leyenda"><h2 style="margin-top:0">Glosario de Go</h2><dl>' + leyenda + "</dl></div>";
+  }
+
+  /* ---------- búsqueda ---------- */
+  var q = document.getElementById("q");
+  var resultados = document.getElementById("resultados");
+  var arbol = document.getElementById("arbol");
+
+  function buscar(texto) {
+    var t = texto.trim().toLowerCase();
+    if (!t) {
+      resultados.classList.remove("visible");
+      resultados.innerHTML = "";
+      arbol.style.display = "";
+      return;
+    }
+    arbol.style.display = "none";
+    var hits = [];
+    archivos.forEach(function (a) {
+      if (a.ruta.toLowerCase().indexOf(t) >= 0) {
+        hits.push({ tipo: "archivo", texto: a.ruta.split("/").pop(), ruta: a.ruta, hash: "#/archivo/" + encodeURIComponent(a.ruta) });
+      }
+    });
+    Object.keys(simbolos).forEach(function (id) {
+      var s = simbolos[id];
+      if ((s.nombre + " " + id).toLowerCase().indexOf(t) >= 0) {
+        hits.push({ tipo: s.tipo, texto: s.nombre, ruta: s.archivo, hash: "#/simbolo/" + encodeURIComponent(id) });
+      }
+    });
+    if (!hits.length) {
+      resultados.innerHTML = '<p class="vacio" style="padding:10px">Sin coincidencias.</p>';
+    } else {
+      resultados.innerHTML = hits.slice(0, 80).map(function (h) {
+        return '<a class="hit" href="' + h.hash + '"><span class="tipo">' + esc(h.tipo) + "</span>" +
+          esc(h.texto) + '<span class="ruta">' + esc(h.ruta) + "</span></a>";
+      }).join("");
+    }
+    resultados.classList.add("visible");
+  }
+
+  q.addEventListener("input", function () { buscar(q.value); });
+  q.addEventListener("keydown", function (e) {
+    if (e.key === "Escape") { q.value = ""; buscar(""); q.blur(); }
+    if (e.key === "Enter") {
+      var first = resultados.querySelector(".hit");
+      if (first) { location.hash = first.getAttribute("href"); buscar(""); q.value = ""; }
+    }
+  });
+  resultados.addEventListener("click", function () { buscar(""); q.value = ""; });
+
+  /* ---------- router ---------- */
+  function router() {
+    var h = location.hash.replace(/^#\/?/, "");
+    if (h.indexOf("archivo/") === 0) {
+      renderArchivo(decodeURIComponent(h.slice("archivo/".length)));
+    } else if (h.indexOf("simbolo/") === 0) {
+      renderSimbolo(decodeURIComponent(h.slice("simbolo/".length)));
+    } else {
+      renderHome();
+    }
+    window.scrollTo(0, 0);
+  }
+
+  window.addEventListener("hashchange", router);
+  router();
+})();
+</script>
+</body>
+</html>
