@@ -66,6 +66,26 @@ impresora fiscal es la fuente del número del documento; el spooler no lo invent
 La idempotencia permite reintentar solicitudes sin volver a imprimir una factura
 ya completada cuando se reutiliza la misma clave y el mismo cuerpo.
 
+### Impresoras compatibles y simulador
+
+Para uso fiscal real, el proyecto está implementado para impresoras fiscales
+**The Factory HKA compatibles con el protocolo TFHKA**. No tiene drivers para
+Epson, Hasar, Bixolon u otras marcas. Que una impresora tenga puerto serie no
+basta para hacerla compatible; un modelo de otra marca sólo podría funcionar si
+implementa el mismo protocolo, y eso no está garantizado ni se considera
+soportado por este proyecto.
+
+El proyecto externo **SimuladorFiscalGO** declara
+simulación de cuatro protocolos/modelos: TFHKA, Hasar SMH/P-615F, Bixolon SRP-270
+y Epson TM2000. Puede usarse por TCP para probar cada driver que se implemente
+(por ejemplo, `127.0.0.1:2011` con `--model tfhka` y
+`printer.transport: tcp`). **Esto no significa que SpoolerFiscal ya soporte esos
+cuatro modelos:** su configuración y driver productivo siguen limitados a TFHKA;
+los otros controladores deben implementarse e integrarse primero. El simulador
+no viene incluido en este repositorio ni es una impresora fiscal real: sirve
+para probar comunicación y flujos de software, no para emitir documentos
+fiscales válidos ni sustituir hardware fiscal en producción.
+
 ## Situación fiscal y SENIAT
 
 La normativa cambia y la autorización depende del contribuyente, su actividad,
