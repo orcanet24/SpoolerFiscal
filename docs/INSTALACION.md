@@ -9,8 +9,8 @@ estación** con Profit Plus. Todas en la misma red.
 - Go 1.24 o superior **sólo en la máquina de compilación** (los ejecutables no lo
   necesitan).
 - Puerto serie físico para la impresora (o adaptador USB-serie).
-- Firewall: el puerto gRPC del servidor (5050 por omisión) accesible desde las
-  estaciones. Si usa la API REST para ecommerce/ERP/CRM, abra también el 8080.
+- Firewall: el puerto HTTP del servidor (8080 por omisión) accesible desde las
+  estaciones.
 - Permisos de administrador para instalar servicios y com0com.
 
 ## 1. Compilar
@@ -32,7 +32,7 @@ go build -o bin\agent.exe   .\cmd\agent
 1. Copie a la PC servidor: `bin\server.exe`, `configs\server.yaml` y una carpeta
    `data\` escribible. Estructura sugerida: `C:\SpoolerFiscal\`.
 2. Edite `configs\server.yaml`:
-   - `listen`: `0.0.0.0:5050`.
+   - `http.listen`: `0.0.0.0:8080` (único puerto; lo usan agentes y sistemas externos).
    - `token`: un secreto largo y único (o use la variable `SPOOLER_TOKEN`).
    - `printer.port.name`: el COM real de la impresora (ej. `COM1`).
    - `printer.port.baud_rate`: 9600 o 115200 según la impresora.
@@ -60,9 +60,7 @@ go build -o bin\agent.exe   .\cmd\agent
 5. Abra el puerto en el firewall:
 
    ```powershell
-   New-NetFirewallRule -DisplayName "Spooler Fiscal gRPC" -Direction Inbound -Protocol TCP -LocalPort 5050 -Action Allow
-   # Sólo si habilitó http.enabled para ecommerce/ERP/CRM:
-   New-NetFirewallRule -DisplayName "Spooler Fiscal REST" -Direction Inbound -Protocol TCP -LocalPort 8080 -Action Allow
+   New-NetFirewallRule -DisplayName "Spooler Fiscal HTTP" -Direction Inbound -Protocol TCP -LocalPort 8080 -Action Allow
    ```
 
    La REST comparte el token de las estaciones. Si cruza una red no confiable,
@@ -99,7 +97,7 @@ go build -o bin\agent.exe   .\cmd\agent
 2. Edite `configs\agent.yaml`:
    - `station_id`: único por estación (`CAJA-01`, `CAJA-02`, …). **No lo repita**:
      es la identidad que queda en la auditoría.
-   - `server.address`: `IP-del-servidor:5050`.
+   - `server.address`: `http://IP-del-servidor:8080`.
    - `server.token`: el mismo del servidor.
    - `virtual_com.name`: `COM4` (el extremo del agente).
    - `virtual_com`: los mismos parámetros que la impresora (9600 8N1 típico).
@@ -130,7 +128,7 @@ The Factory**, puerto **COM3**, 9600 8N1, sin control de flujo.
 3. En el servidor debe aparecer `documento fiscal registrado` con tipo, número y
    estación; en la estación, `documentos registrados` por el spooler.
 4. En la base: `data\spooler.db`, tabla `documents`.
-5. API REST (si `http.enabled: true`):
+5. API HTTP:
 
    ```bash
    curl http://127.0.0.1:8080/v1/health
@@ -211,8 +209,8 @@ curl.exe -X POST http://127.0.0.1:8080/v1/invoices -H "Authorization: Bearer CAM
   -d '{\"station\":\"CAJA-01\",\"lines\":[\"!   1.000     10.00CAFE\",\"101\"]}'
 ```
 
-El agente de estación (`bin\cliente`) se conecta al servidor por gRPC con el
-`.env` (`SPOOLER_SERVER_ADDR=127.0.0.1:5050`, `SPOOLER_TOKEN` y
+El agente de estación (`bin\cliente`) se conecta al servidor por HTTP con el
+`.env` (`SPOOLER_SERVER_ADDR=http://127.0.0.1:8080`, `SPOOLER_TOKEN` y
 `SPOOLER_STATION_ID`); el puente COM de la estación requiere `com0com`.
 
 

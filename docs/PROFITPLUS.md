@@ -55,7 +55,7 @@ una impresora fiscal serie.
 | Servicio activo | `sc query SpoolerFiscalAgent` |
 | Puerto virtual existe | `"C:\Program Files (x86)\com0com\setupc.exe" list` |
 | Puerto libre | cierre el panel del simulador u otra app que use `COM3`/`COM4` |
-| Servidor alcanzable | `Test-NetConnection IP-SERVIDOR -Port 5050` |
+| Servidor alcanzable | `Test-NetConnection IP-SERVIDOR -Port 8080` |
 | Token correcto | compare `server.token` con el del servidor |
 
 El agente **no inventa respuestas** si el servidor no contesta: Profit Plus verá

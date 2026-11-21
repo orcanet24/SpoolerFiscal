@@ -1,12 +1,12 @@
 openapi: 3.0.3
 info:
-  title: Spooler Fiscal — API REST
+  title: Spooler Fiscal — API HTTP
   version: "1.0.0"
   description: |
-    API HTTP/JSON del spooler fiscal central. Comparte con las estaciones COM la
+    API HTTP/JSON del spooler fiscal central. La usan los agentes de estación
+    (Profit Plus) y sistemas externos (ecommerce, ERP web, CRM), y comparte la
     misma cola serializada, el turno exclusivo por factura y el correlativo
-    único: cualquier sistema (ecommerce, ERP web, CRM) puede emitir sin hablar
-    gRPC. El servidor no interpreta la fiscalidad: recibe las líneas del
+    único. El servidor no interpreta la fiscalidad: recibe las líneas del
     protocolo TFHKA ya formateadas y las ejecuta en orden.
 
     Autenticación: `Authorization: Bearer <token>` (el mismo token de las
@@ -465,7 +465,8 @@ components:
       properties:
         station: {type: string}
         session: {type: string}
-        response: {type: string}
+        response: {type: string, description: Respuesta fiscal en texto (si es UTF-8 válido)}
+        response_base64: {type: string, description: Respuesta fiscal íntegra en base64; la usa el agente}
         sequence: {type: integer, format: int64}
         queue_wait_ms: {type: integer, format: int64}
         latency_ms: {type: integer, format: int64}
@@ -482,6 +483,8 @@ components:
         paper_out: {type: boolean}
         fiscal_memory_full: {type: boolean}
         fiscal_memory_almost_full: {type: boolean}
+        blocked: {type: boolean, description: El guardián bloquea la emisión}
+        blocked_reason: {type: string}
         last_error: {type: string}
         raw: {type: string}
         checked_at_unix: {type: integer, format: int64}

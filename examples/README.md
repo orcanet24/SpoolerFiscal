@@ -44,7 +44,7 @@ idempotencia y **no se imprime otra factura**.
 
 ## Antes de ejecutar
 
-1. El servidor debe estar corriendo con `http.enabled: true`.
+1. El servidor debe estar corriendo e escuchando en `http.listen` (`0.0.0.0:8080` por omisión).
 2. El puerto (`8080` por omisión) debe ser accesible desde el equipo del ejemplo.
 3. El token debe coincidir con `token` del `configs/server.yaml`.
 4. La impresora debe estar online y sin papel agotado.

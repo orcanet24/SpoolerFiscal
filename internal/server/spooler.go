@@ -783,7 +783,7 @@ func (s *Spooler) correlativeStaleLocked() bool {
 // SyncCorrelative concilia el correlativo con la impresora (S1) y devuelve el
 // mapa de últimos números emitidos por tipo. Con force=false sólo consulta si
 // la última conciliación está vencida. La API REST lo llama antes de la primera
-// línea de cada factura; el planificador lo inyecta para las estaciones gRPC.
+// línea de cada factura; el planificador lo inyecta para las estaciones.
 func (s *Spooler) SyncCorrelative(ctx context.Context, force bool) (map[string]int64, error) {
 	if _, ok := s.printer.(fiscal.CorrelativeSource); !ok {
 		return s.Correlatives(), nil

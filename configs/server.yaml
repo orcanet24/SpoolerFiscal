@@ -2,8 +2,8 @@
 # Copie este archivo junto al binario y ajuste los valores antes de instalar el
 # servicio. El token puede fijarse aquí o en la variable de entorno SPOOLER_TOKEN.
 
-# Interfaz de escucha gRPC para las estaciones.
-listen: 0.0.0.0:5050
+# El servidor escucha una única API HTTP: la usan los agentes de estación y
+# los sistemas externos (ecommerce, ERP, CRM).
 
 # Token compartido con los agentes. Cámbielo en producción.
 token: CAMBIAR-ESTE-TOKEN
@@ -17,9 +17,6 @@ tls:
 
 # Lista blanca de estaciones. Vacía = se acepta cualquier station_id.
 allowed_stations: []
-
-# Expiración de sesiones inactivas.
-session_ttl_minutes: 120
 
 printer:
   driver: tfhka              # único driver implementado (The Factory HKA, ASCII)
@@ -86,11 +83,11 @@ logging:
 metrics:
   interval_seconds: 60
 
-# API REST opcional para ecommerce, ERP web o CRM. Comparte token, cola,
-# turno por factura y correlativo con las estaciones. Ver docs/API.md y
-# api/openapi.yaml. Use TLS si cruza la red de la empresa.
+# API HTTP del spooler: la usan los agentes de estación y los sistemas
+# externos (ecommerce, ERP, CRM). Comparte token, cola, turno por factura y
+# correlativo. Ver docs/API.md y api/openapi.yaml. Use TLS si cruza la red de
+# la empresa.
 http:
-  enabled: true
   listen: 0.0.0.0:8080
   max_body_bytes: 262144
   read_timeout_ms: 15000

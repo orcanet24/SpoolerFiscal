@@ -36,7 +36,7 @@ ni emulación de kernel**: com0com es un driver firmado de terceros, y todo el
 comportamiento fiscal vive en el binario Go.
 
 ```
-Profit Plus  ──COM3──┐            ┌──COM4──  agent.exe  ──gRPC──  server.exe  ──COM1──  Impresora
+Profit Plus  ──COM3──┐            ┌──COM4──  agent.exe  ──HTTP───  server.exe  ──COM1──  Impresora
                      └── com0com ──┘
 ```
 
@@ -106,16 +106,16 @@ sesión, hashes SHA-256 del comando y la respuesta, texto de la respuesta) y una
 bitácora de comandos con latencia y resultado. La retención de la bitácora es
 configurable; **los documentos no se purgan**.
 
-## 6. API REST integrada en el servidor, no un gateway aparte
+## 6. API HTTP integrada en el servidor, no un gateway aparte
 
-Los sistemas externos (ecommerce, ERP web, CRM) necesitan una API distinta de
-COM/gRPC. Se descartó un proceso intermedio REST → gRPC: duplica despliegue,
+Los agentes de estación y los sistemas externos (ecommerce, ERP web, CRM) usan la
+misma API HTTP del servidor. Se descartó un proceso intermedio: duplica despliegue,
 token y ciclo de vida, y dos gateways podrían partir el turno por factura en dos
 colas.
 
-La REST vive en `server.exe` (`internal/server/httpapi.go`) y usa el mismo
+La API HTTP vive en `server.exe` (`internal/server/httpapi.go`) y usa el mismo
 `Spooler`: una cola, un correlativo, un turno exclusivo y una auditoría. Se
-habilita con `http.enabled`; el contrato es `api/openapi.yaml`.
+configura con `http.listen`; el contrato es `api/openapi.yaml`.
 
 Dos decisiones de seguridad y fiscalidad:
 
@@ -153,8 +153,8 @@ TFHKA no responde (verificado contra el simulador de referencia).
    contador `duplicates_detected` y devuelve `duplicate=true`; la factura ya está
    impresa, así que no se oculta el hecho.
 5. **Guardián de estado.** Con papel agotado, memoria fiscal llena o error
-   físico/fiscal, el spooler rechaza la emisión (`FailedPrecondition`) y lo
-   informa por gRPC. Los errores de comando (p. ej. `0x50`) no bloquean.
+   físico/fiscal, el spooler rechaza la emisión (`409 printer_blocked`) y lo
+   informa por HTTP. Los errores de comando (p. ej. `0x50`) no bloquean.
 6. **Respuestas íntegras.** Se devuelven los bytes exactos de la impresora; el
    agente los escribe tal cual en el COM virtual. Si el servidor no responde, no
    se inventa una respuesta fiscal: Profit Plus ve un timeout (o los bytes que el

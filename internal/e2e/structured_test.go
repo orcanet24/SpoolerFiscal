@@ -31,14 +31,12 @@ func TestStructuredInvoiceAgainstSimulator(t *testing.T) {
 
 	cfg := config.DefaultServer()
 	dir := t.TempDir()
-	cfg.Listen = "127.0.0.1:0"
 	cfg.Token = "token-estructurada-e2e"
 	cfg.Printer.Transport = "tcp"
 	cfg.Printer.TCPAddress = addr
 	cfg.Database.Path = filepath.Join(dir, "spooler.db")
 	cfg.Logging.File = filepath.Join(dir, "server.log")
 	cfg.Logging.Console = false
-	cfg.HTTP.Enabled = true
 	cfg.HTTP.Listen = "127.0.0.1:0"
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -55,7 +53,7 @@ func TestStructuredInvoiceAgainstSimulator(t *testing.T) {
 		_ = rt.Close()
 	}()
 
-	base := "http://" + rt.HTTPAddr()
+	base := "http://" + rt.Addr()
 	client := &http.Client{Timeout: 60 * time.Second}
 	waitHealthy(t, client, base+"/v1/health")
 

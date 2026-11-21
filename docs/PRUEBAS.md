@@ -14,8 +14,8 @@ y reporte Z**.
 | Pieza | Cómo | Puerto |
 |---|---|---|
 | Impresora fiscal simulada | `C:\Proyectos\GO\SimuladorFiscalGO\iniciar_servicio.bat` (modo `serve`, modelo TFHKA) | TCP `127.0.0.1:2011` |
-| Servidor spooler | `.\bin\server\iniciar.bat` | gRPC `5050`, REST `8080` |
-| Estación (agente) | `.\bin\cliente\iniciar.bat` (opcional; requiere `com0com`) | COM virtual ↔ gRPC `5050` |
+| Servidor spooler | `.\bin\server\iniciar.bat` | API HTTP `8080` |
+| Estación (agente) | `.\bin\cliente\iniciar.bat` (opcional; requiere `com0com`) | COM virtual ↔ HTTP `8080` |
 
 El servidor debe tener en `bin\server\configs\server.yaml`:
 
@@ -56,8 +56,8 @@ cd C:\Proyectos\GO\SpoolerFiscal\bin\cliente
 
 Señales de que están vivos:
 
-- Server: `spooler fiscal escuchando addr=[::]:5050` y `api REST escuchando addr=[::]:8080`.
-- Cliente: `agente iniciado estacion=CAJA-01 servidor=127.0.0.1:5050`.
+- Server: `spooler fiscal escuchando addr=[::]:8080`.
+- Cliente: `agente iniciado estacion=CAJA-01 servidor=http://127.0.0.1:8080`.
 
 ---
 

@@ -40,7 +40,7 @@ func TestLoadExampleAgentConfig(t *testing.T) {
 	if cfg.VirtualCOM.Name != "COM4" {
 		t.Fatalf("puerto virtual = %q", cfg.VirtualCOM.Name)
 	}
-	if cfg.Server.Address != "192.168.1.10:5050" {
+	if cfg.Server.Address != "http://192.168.1.10:8080" {
 		t.Fatalf("address = %q", cfg.Server.Address)
 	}
 }
@@ -48,7 +48,7 @@ func TestLoadExampleAgentConfig(t *testing.T) {
 func TestAgentRequiresStationAndToken(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "agent.yaml")
-	if err := os.WriteFile(path, []byte("server:\n  address: 127.0.0.1:5050\n"), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte("server:\n  address: http://127.0.0.1:8080\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	_, err := LoadAgent(path)
@@ -64,7 +64,7 @@ func TestAgentRequiresStationAndToken(t *testing.T) {
 func TestUnknownKeyIsRejected(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "server.yaml")
-	content := "token: x\nlisten: 127.0.0.1:5050\ncampo_inexistente: 1\n"
+	content := "token: x\ncampo_inexistente: 1\n"
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -76,11 +76,11 @@ func TestUnknownKeyIsRejected(t *testing.T) {
 func TestTokenFromEnvironment(t *testing.T) {
 	t.Setenv("SPOOLER_TOKEN", "token-de-entorno")
 	cfg := DefaultServer()
-	cfg.Listen = "127.0.0.1:0"
+	cfg.HTTP.Listen = "127.0.0.1:0"
 	cfg.Database.Path = "data/x.db"
 	dir := t.TempDir()
 	path := filepath.Join(dir, "server.yaml")
-	if err := os.WriteFile(path, []byte("listen: 127.0.0.1:5050\ndatabase:\n  path: data/x.db\n"), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte("http:\n  listen: 127.0.0.1:8080\ndatabase:\n  path: data/x.db\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	loaded, err := LoadServer(path)

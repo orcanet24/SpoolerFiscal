@@ -313,7 +313,7 @@ func TestPrinterErrorResponseReachesCaller(t *testing.T) {
 		Command: []byte("BADCMD\r"), Station: "CAJA-01", Session: "s", Timeout: 5 * time.Second,
 	})
 	if err != nil {
-		t.Fatalf("el error de la impresora debe viajar como respuesta, no como fallo gRPC: %v", err)
+		t.Fatalf("el error de la impresora debe viajar como respuesta, no como fallo de transporte: %v", err)
 	}
 	if !strings.Contains(string(res.Response), "ERROR|0x50") {
 		t.Fatalf("respuesta = %q", res.Response)

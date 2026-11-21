@@ -197,12 +197,12 @@
     <div class="card"><h4>Una cola, un escritor</h4><p>Sólo el servidor escribe en la impresora. Nunca hay dos manos sobre el mismo puerto.</p></div>
     <div class="card"><h4>Turno por factura</h4><p>La caja que abre una factura conserva el turno hasta cerrarla: nada se intercala.</p></div>
     <div class="card"><h4>Sin reenvío ciego</h4><p>Si un comando pudo imprimirse, no se reintenta: se evita la doble emisión.</p></div>
-    <div class="card"><h4>API para otros sistemas</h4><p>Ecommerce, ERP web o CRM pueden facturar por HTTP sin hablar COM ni gRPC.</p></div>
+    <div class="card"><h4>API para otros sistemas</h4><p>Ecommerce, ERP web o CRM pueden facturar por HTTP sin hablar COM.</p></div>
   </div>
 
   <h3>Qué incluye</h3>
   <ul>
-    <li><code>server.exe</code>: cola, guardián de estado, SQLite, gRPC para las estaciones y API REST.</li>
+    <li><code>server.exe</code>: cola, guardián de estado, SQLite y la API HTTP para las estaciones y sistemas externos.</li>
     <li><code>agent.exe</code>: puente entre el COM virtual de cada caja y el servidor.</li>
     <li>Driver fiscal TFHKA (The Factory HKA, ASCII), aislado para poder añadir otras marcas.</li>
     <li>Servicios de Windows, scripts de instalación, logs con rotación y manual (este documento).</li>
@@ -219,9 +219,9 @@
 │   │ COM3              │        │  ├ cola serializada    │        │ (The Factory)│
 │   ▼                   │        │  ├ turno por factura   │        │              │
 │ com0com (COM3↔COM4)   │        │  ├ correlativo         │        │              │
-│   │                   │  gRPC  │  ├ SQLite auditoría    │ serie  │              │
+│   │                   │  HTTP  │  ├ SQLite auditoría    │ serie  │              │
 │ agent.exe (COM4) ─────┼───────►│  ├ guardián de estado  │───────►│   COM1       │
-└───────────────────────┘        │  └ API REST /v1        │        └──────────────┘
+└───────────────────────┘        │  └ API HTTP /v1       │        └──────────────┘
                                  └───────────▲────────────┘
                                              │ HTTP
                                  ecommerce · ERP web · CRM</pre>
@@ -229,7 +229,7 @@
   <h3>El recorrido de una factura</h3>
   <ol class="steps">
     <li><strong>Profit Plus escribe en COM3.</strong> Cree que habla con una impresora; en realidad habla con un extremo de com0com.</li>
-    <li><strong>El agente lee COM4.</strong> Delimita la trama por silencio (no interpreta el protocolo) y la envía por gRPC al servidor con el token.</li>
+    <li><strong>El agente lee COM4.</strong> Delimita la trama por silencio (no interpreta el protocolo) y la envía por HTTP al servidor con el token.</li>
     <li><strong>El servidor encola.</strong> Cada estación tiene su cola; una sola estación tiene el turno en cada momento.</li>
     <li><strong>Se escribe en la impresora.</strong> El servidor envía el comando, lee la respuesta íntegra y la devuelve a la estación.</li>
     <li><strong>Se registra.</strong> Si la respuesta es una factura, guarda tipo, número, estación, hashes y latencia. Detecta números repetidos.</li>
@@ -243,7 +243,7 @@
       <tr><td><strong>Turno exclusivo</strong></td><td>La primera línea de ítem abre una factura y retiene la impresora hasta el cierre (<code>101</code>). Las demás cajas esperan.</td></tr>
       <tr><td><strong>Correlativo</strong></td><td>Lo asigna la impresora; el servidor lo registra y detecta si un número se repite (doble emisión).</td></tr>
       <tr><td><strong>Guardián</strong></td><td>Si hay papel agotado, memoria fiscal llena o un error fiscal, el servidor rechaza la emisión antes de escribir.</td></tr>
-      <tr><td><strong>Idempotencia</strong></td><td>En REST, una <code>Idempotency-Key</code> repetida devuelve la respuesta guardada sin volver a imprimir.</td></tr>
+      <tr><td><strong>Idempotencia</strong></td><td>Una <code>Idempotency-Key</code> repetida devuelve la respuesta guardada sin volver a imprimir.</td></tr>
       <tr><td><strong>Turno abandonado</strong></td><td>Si una caja muere con una factura abierta, el turno se libera tras <code>document_lock_timeout_ms</code>.</td></tr>
     </tbody>
   </table>
@@ -261,7 +261,7 @@
     <li>Impresora fiscal TFHKA con puerto serie (o adaptador USB-serie).</li>
     <li>Driver <strong>com0com</strong> en cada estación (par de puertos virtuales).</li>
     <li>Permisos de administrador para instalar servicios y com0com.</li>
-    <li>Puerto 5050 (gRPC) abierto entre estaciones y servidor; 8080 si usa la API REST.</li>
+    <li>Puerto 8080 (HTTP) abierto entre estaciones, servidor y sistemas externos.</li>
   </ul>
 
   <h3>Compilar</h3>
@@ -274,8 +274,7 @@ go build -trimpath -ldflags "-s -w" -o bin\agent.exe  .\cmd\agent</code><span cl
 
   <h3>3.1 Configurar el servidor</h3>
   <p>Copie <code>configs\server.yaml</code> junto al binario y ajuste al menos el token y el puerto de la impresora:</p>
-  <pre><code>listen: 0.0.0.0:5050            # gRPC para las estaciones
-token: CAMBIAR-ESTE-TOKEN       # el mismo en todos los agentes
+  <pre><code>token: CAMBIAR-ESTE-TOKEN       # el mismo en todos los agentes
 
 printer:
   driver: tfhka
@@ -295,8 +294,7 @@ queue:
   document_lock_timeout_ms: 120000
 
 http:
-  enabled: true                 # API REST para ecommerce/ERP/CRM
-  listen: 0.0.0.0:8080
+  listen: 0.0.0.0:8080            # API HTTP (agentes y sistemas externos)
 
 database:
   path: data/spooler.db</code><span class="lang">yaml</span></pre>
@@ -306,7 +304,7 @@ database:
   <h3>3.2 Configurar la estación</h3>
   <pre><code>station_id: CAJA-01
 server:
-  address: 192.168.1.10:5050
+  address: http://192.168.1.10:8080
   token: CAMBIAR-ESTE-TOKEN
 
 virtual_com:
@@ -345,8 +343,8 @@ agent.exe  -docs</code><span class="lang">bash</span></pre>
 </section>
 
 <section id="api">
-  <h2>3.1 API REST</h2>
-  <p>La API vive dentro de <code>server.exe</code> y comparte cola, turno y correlativo con las estaciones. Se habilita con <code>http.enabled: true</code>. Todas las rutas salvo la salud exigen el token compartido.</p>
+  <h2>3.1 API HTTP</h2>
+  <p>La API vive dentro de <code>server.exe</code> y comparte cola, turno y correlativo con las estaciones. Se configura con <code>http.listen</code>. Todas las rutas salvo la salud exigen el token compartido.</p>
 
   <h3>Autenticación</h3>
   <pre><code>Authorization: Bearer CAMBIAR-ESTE-TOKEN</code><span class="lang">http</span></pre>
@@ -1063,9 +1061,9 @@ Impresora: 0|Factura 6|Total: 20.00|Impreso:6</code></pre></div>
 <section id="seguridad">
   <h2>6. Seguridad</h2>
   <ul>
-    <li><strong>Token compartido:</strong> es la única credencial de estaciones y REST. Use uno largo y distinto por instalación. Se puede inyectar con <code>SPOOLER_TOKEN</code> sin escribirlo en el YAML.</li>
-    <li><strong>HTTPS:</strong> active <code>tls.enabled</code> con certificado y clave. Para gRPC, <code>tls.ca_file</code> activa mTLS entre agente y servidor. La REST usa el mismo certificado pero autentica por token.</li>
-    <li><strong>Firewall:</strong> abra 5050 y 8080 sólo hacia la red de la empresa. No exponga la API a Internet.</li>
+    <li><strong>Token compartido:</strong> es la única credencial de estaciones y sistemas externos. Use uno largo y distinto por instalación. Se puede inyectar con <code>SPOOLER_TOKEN</code> sin escribirlo en el YAML.</li>
+    <li><strong>HTTPS:</strong> active <code>tls.enabled</code> con certificado y clave; la API y los agentes usan el mismo certificado y autentican por token. <code>tls.ca_file</code> define la CA de confianza para verificar al servidor.</li>
+    <li><strong>Firewall:</strong> abra 8080 sólo hacia la red de la empresa. No exponga la API a Internet.</li>
     <li><strong>Lista blanca:</strong> <code>allowed_stations</code> limita qué estaciones pueden abrir sesión.</li>
     <li><strong>Permisos:</strong> el YAML y <code>data\</code> quedan restringidos; no los copie a equipos de usuarios.</li>
     <li><strong>Auditoría:</strong> no borre <code>documents</code>. Es su respaldo ante una discrepancia fiscal.</li>
@@ -1134,9 +1132,9 @@ Impresora: 0|Factura 6|Total: 20.00|Impreso:6</code></pre></div>
         <td>No borre el registro. Investigue el pedido; el original se conserva en <code>documents</code>.</td>
       </tr>
       <tr>
-        <td><code>/docs</code> responde 404</td>
-        <td>La API REST está apagada.</td>
-        <td>Active <code>http.enabled: true</code> y reinicie el servidor.</td>
+        <td>El servicio no escucha en el puerto</td>
+        <td><code>http.listen</code> vacío o puerto ocupado.</td>
+        <td>Configure <code>http.listen</code> (ej. <code>0.0.0.0:8080</code>) y reinicie el servidor.</td>
       </tr>
       <tr>
         <td>El servicio no arranca</td>

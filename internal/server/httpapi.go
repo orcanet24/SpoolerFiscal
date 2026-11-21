@@ -18,9 +18,14 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"spoolerfiscal/internal/fiscal"
 )
+
+// ProtocolVersion es la versión del contrato de la API. El agente la valida
+// contra GET /v1/health.
+const ProtocolVersion uint32 = 1
 
 // HTTPConfig configura la API REST.
 type HTTPConfig struct {
@@ -42,9 +47,9 @@ type HTTPConfig struct {
 	JobResumeBatch int
 }
 
-// HTTPAPI expone el spooler por HTTP/JSON para sistemas que no hablan gRPC
-// (ecommerce, ERP web, CRM). Usa el mismo Spooler que las estaciones: una sola
-// cola, un solo turno por factura y un solo correlativo. Las facturas REST se
+// HTTPAPI expone el spooler por HTTP/JSON: la usan los agentes de estación y los
+// sistemas externos (ecommerce, ERP web, CRM). Usa el mismo Spooler que las
+// estaciones: una sola cola, un solo turno por factura y un solo correlativo. Las facturas REST se
 // persisten como trabajos (print_jobs): si la impresora se queda sin papel o
 // se cae, la cola queda pausada en la BD y se reanuda sola cuando vuelve.
 type HTTPAPI struct {
@@ -375,6 +380,17 @@ func (a *HTTPAPI) spoolerError(err error) (int, string) {
 	}
 }
 
+// responseText devuelve la respuesta como texto sólo si es UTF-8 válido. El
+// agente usa response_base64, que preserva los bytes fiscales íntegros.
+func responseText(b []byte) string {
+	if utf8.Valid(b) {
+		return string(b)
+	}
+	return ""
+}
+
+// runCommand recibe un comando fiscal crudo y devuelve la respuesta de la
+// impresora. Es el extremo que usa el agente de estación (COM virtual).
 func (a *HTTPAPI) runCommand(ctx context.Context, req commandRequest, idemKey string) (int, any) {
 	if status, msg := a.validateStation(req.Station); status != 0 {
 		return status, errorEnvelopeOf(statusCode(status), msg, nil)
@@ -411,13 +427,14 @@ func (a *HTTPAPI) runCommand(ctx context.Context, req commandRequest, idemKey st
 		return status, errorEnvelopeOf(code, err.Error(), nil)
 	}
 	out := commandJSON{
-		Station:     req.Station,
-		Session:     session,
-		Response:    string(res.Response),
-		Sequence:    res.Sequence,
-		QueueWaitMS: res.QueueWait.Milliseconds(),
-		LatencyMS:   res.Latency.Milliseconds(),
-		Status:      printerStatusJSONOf(res.Status),
+		Station:        req.Station,
+		Session:        session,
+		Response:       responseText(res.Response),
+		ResponseBase64: base64.StdEncoding.EncodeToString(res.Response),
+		Sequence:       res.Sequence,
+		QueueWaitMS:    res.QueueWait.Milliseconds(),
+		LatencyMS:      res.Latency.Milliseconds(),
+		Status:         printerStatusJSONOf(res.Status),
 	}
 	if res.Document != nil {
 		out.Document = documentJSONOf(res.Document)
@@ -1089,14 +1106,15 @@ type invoiceRequest struct {
 }
 
 type commandJSON struct {
-	Station     string            `json:"station"`
-	Session     string            `json:"session"`
-	Response    string            `json:"response"`
-	Sequence    int64             `json:"sequence"`
-	QueueWaitMS int64             `json:"queue_wait_ms"`
-	LatencyMS   int64             `json:"latency_ms"`
-	Status      printerStatusJSON `json:"status"`
-	Document    *documentJSON     `json:"document,omitempty"`
+	Station        string            `json:"station"`
+	Session        string            `json:"session"`
+	Response       string            `json:"response"`
+	ResponseBase64 string            `json:"response_base64"`
+	Sequence       int64             `json:"sequence"`
+	QueueWaitMS    int64             `json:"queue_wait_ms"`
+	LatencyMS      int64             `json:"latency_ms"`
+	Status         printerStatusJSON `json:"status"`
+	Document       *documentJSON     `json:"document,omitempty"`
 }
 
 type lineJSON struct {

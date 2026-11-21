@@ -4,7 +4,7 @@ const serverUsage = `Uso: server.exe [opciones]
 
 Spooler fiscal central: recibe los comandos de todas las estaciones y los
 ejecuta en orden sobre una única impresora fiscal. Mantiene el correlativo y la
-auditoría, y expone una API REST opcional.
+auditoría, y expone una API HTTP.
 
 Opciones:
   -config <archivo>  Configuración YAML (por omisión configs\server.yaml)
@@ -19,7 +19,7 @@ Ejemplos:
   server.exe -console -config configs\server.yaml
   server.exe -install -config C:\SpoolerFiscal\configs\server.yaml
 
-Documentación (con http.enabled: true):
+Documentación:
   http://127.0.0.1:8080/docs
   http://127.0.0.1:8080/docs/openapi.yaml
   docs\manual.html
@@ -32,7 +32,7 @@ const serverDocs = `Guía rápida — Servidor fiscal
    - token: el mismo que usarán todos los agentes
    - printer.port.name: puerto real de la impresora (por ejemplo COM1)
    - printer.command_terminator: "\r\n"  (con \r solo la TFHKA no responde)
-   - http.enabled: true si va a usar la API REST
+   - http.listen: 0.0.0.0:8080 (único puerto; lo usan agentes y sistemas externos)
 
 2. Arranque en consola:
    server.exe -console -config configs\server.yaml

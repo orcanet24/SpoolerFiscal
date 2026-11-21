@@ -81,49 +81,39 @@ spooler agrega su `sequence` y los hashes SHA-256 del comando y de la respuesta.
 ## 5. Guardián de estado
 
 Con `guard.block_on_paper_out`, `block_on_memory_full` o `block_on_error`, el
-spooler rechaza la emisión (gRPC `FailedPrecondition`) si el último estado
+spooler rechaza la emisión (HTTP `409 printer_blocked`) si el último estado
 conocido tiene papel agotado, memoria fiscal llena o un error físico/fiscal
 (`0x01`-`0x03`, `0x60`, `0x64`, `0x6C`, `0x80`, `0x89`, `0x90`). Los errores de
 comando (`0x50`, `0x54`, …) no bloquean: son rechazos de una instrucción, no
 fallas de la máquina. El bloqueo se libera con la siguiente respuesta limpia.
 
-## 6. Contrato gRPC (`proto/spooler/v1/fiscal.proto`)
+## 6. Contrato HTTP (API del servidor)
 
-Paquete `spooler.v1`, versión de contrato `1` (validada en `Ping`). El agente
-rechaza un servidor con otra versión.
+Un solo puerto (`http.listen`, 8080 por omisión). Todas las rutas exigen el
+token compartido en `Authorization: Bearer <token>` (o `X-Spooler-Token`), con
+comparación en tiempo constante, salvo `GET /v1/health`. `tls.enabled` con
+`cert_file`/`key_file` sirve HTTPS.
 
-| RPC | Uso |
+| Ruta | Uso |
 | --- | --- |
-| `Ping` | Conectividad, token y versión; devuelve versión del servidor y driver |
-| `OpenSession` | Registra `station_id`, devuelve `session_id`, datos de la impresora y último correlativo |
-| `CloseSession` | Libera la sesión (las sesiones inactivas expiran) |
-| `SendCommand` | Bytes fiscales → respuesta íntegra, estado y documento registrado |
-| `GetStatus` | Estado de impresora, cola y contadores; `probe=true` consulta a la impresora |
-| `GetPrinterInfo` | Modelo, serial, RIF, firmware y memoria fiscal |
+| `GET /v1/health` | Conectividad y versión del contrato (pública) |
+| `POST /v1/commands` | Bytes fiscales crudos → respuesta íntegra, estado y documento; es el extremo que usa el agente |
+| `GET /v1/status` | Estado de impresora, cola y contadores; `?probe=1` consulta a la impresora |
+| `GET /v1/printer` | Modelo, serial, RIF, firmware y memoria fiscal |
+| `POST /v1/invoices` | Factura por líneas TFHKA (sistemas externos) |
+| `POST /v1/invoices/structured` | Factura por ítems JSON con validación de totales |
 
-**Autenticación:** toda RPC exige el token compartido en la metadata
-`authorization: Bearer <token>` (o `x-spooler-token`). Comparación en tiempo
-constante. `tls.enabled` + `ca_file`/`cert_file`/`key_file` habilita TLS y mTLS.
+El agente envía `command_base64` y recibe `response_base64`, así los bytes
+fiscales viajan íntegros. Usa `Idempotency-Key` con la referencia del comando:
+un reintento por red no duplica la emisión.
 
 **Errores del spooler:**
 
-| Situación | Código gRPC |
+| Situación | Código HTTP |
 | --- | --- |
-| Sesión inexistente/expirada | `NotFound` |
-| Token inválido | `Unauthenticated` |
-| Estación fuera de la lista blanca | `PermissionDenied` |
-| Guardián bloquea (papel/memoria/error) | `FailedPrecondition` |
-| Cola llena | `ResourceExhausted` |
-| Impresora caída o sin respuesta | `Unavailable` |
-| Timeout de la petición en cola | `DeadlineExceeded` |
-
-**Regenerar el código:**
-
-```bash
-protoc --proto_path=. \
-  --go_out=. --go_opt=paths=source_relative \
-  --go-grpc_out=. --go-grpc_opt=paths=source_relative \
-  proto/spooler/v1/fiscal.proto
-```
-
-(Requiere `protoc`, `protoc-gen-go` y `protoc-gen-go-grpc`.)
+| Token inválido o ausente | `401 unauthorized` |
+| Estación fuera de la lista blanca | `403 forbidden` |
+| Guardián bloquea (papel/memoria/error) | `409 printer_blocked` |
+| Cola llena | `429 queue_full` |
+| Impresora caída o sin respuesta | `503 printer_unavailable` |
+| Timeout de la petición en cola | `504 timeout` |

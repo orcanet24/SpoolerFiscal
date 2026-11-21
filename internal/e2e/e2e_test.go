@@ -1,16 +1,18 @@
 // Package e2e prueba el circuito completo: Profit Plus (simulado) → COM
-// virtual (stream en memoria) → puente → agente gRPC → spooler → impresora
+// virtual (stream en memoria) → puente → agente HTTP → spooler → impresora
 // fiscal emulada por TCP. Verifica transparencia de bytes, correlativo único,
 // serialización, detección de duplicados y persistencia tras reinicio.
 package e2e
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
@@ -20,19 +22,12 @@ import (
 	"testing"
 	"time"
 
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/metadata"
-	"google.golang.org/grpc/status"
-
 	"spoolerfiscal/internal/agent"
 	"spoolerfiscal/internal/comvirt"
 	"spoolerfiscal/internal/config"
 	"spoolerfiscal/internal/frame"
 	"spoolerfiscal/internal/server"
 	"spoolerfiscal/internal/testutil"
-	pb "spoolerfiscal/proto/spooler/v1"
 )
 
 const testToken = "token-de-prueba-e2e"
@@ -56,7 +51,7 @@ func startServer(t *testing.T, dbPath, simAddr string) *serverHarness {
 func startServerOn(t *testing.T, dbPath, simAddr, listen string) *serverHarness {
 	t.Helper()
 	cfg := config.DefaultServer()
-	cfg.Listen = listen
+	cfg.HTTP.Listen = listen
 	cfg.Token = testToken
 	cfg.Database.Path = dbPath
 	cfg.Database.LogCommands = false
@@ -101,9 +96,8 @@ func startAgent(t *testing.T, ctx context.Context, addr, station string) frame.S
 	t.Helper()
 	cfg := config.DefaultAgent()
 	cfg.StationID = station
-	cfg.Server.Address = addr
+	cfg.Server.Address = "http://" + addr
 	cfg.Server.Token = testToken
-	cfg.Server.DialTimeoutMS = 2000
 	cfg.Server.RequestTimeoutMS = 15000
 	cfg.Bridge.ReadGapMS = 20
 	cfg.Bridge.ResponseTimeoutMS = 15000
@@ -353,30 +347,63 @@ func TestAuthTokenIsRequired(t *testing.T) {
 	}
 	defer func() { _ = simLn.Close() }()
 	h := startServer(t, filepath.Join(t.TempDir(), "spooler.db"), simLn.Addr().String())
+	base := "http://" + h.rt.Addr()
 
-	conn, err := grpc.NewClient(h.rt.Addr(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	// health es público y reporta la versión del contrato.
+	res, err := http.Get(base + "/v1/health")
 	if err != nil {
-		t.Fatalf("grpc.NewClient: %v", err)
+		t.Fatalf("health: %v", err)
 	}
-	defer func() { _ = conn.Close() }()
-	client := pb.NewFiscalSpoolerClient(conn)
-
-	if _, err := client.Ping(ctx, &pb.PingRequest{}); status.Code(err) != codes.Unauthenticated {
-		t.Fatalf("sin token se esperaba Unauthenticated, se obtuvo %v", err)
+	var health struct {
+		ProtocolVersion uint32 `json:"protocol_version"`
+	}
+	_ = json.NewDecoder(res.Body).Decode(&health)
+	_ = res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("health = %d", res.StatusCode)
+	}
+	if health.ProtocolVersion != 1 {
+		t.Fatalf("versión de protocolo = %d", health.ProtocolVersion)
 	}
 
-	authed := metadata.AppendToOutgoingContext(ctx, "authorization", "Bearer "+testToken)
-	resp, err := client.Ping(authed, &pb.PingRequest{ClientVersion: "test"})
+	// status sin token: 401.
+	res, err = http.Get(base + "/v1/status")
 	if err != nil {
-		t.Fatalf("Ping autenticado: %v", err)
+		t.Fatalf("status sin token: %v", err)
 	}
-	if resp.ProtocolVersion != 1 {
-		t.Fatalf("versión de protocolo = %d", resp.ProtocolVersion)
+	_ = res.Body.Close()
+	if res.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("sin token se esperaba 401, se obtuvo %d", res.StatusCode)
 	}
 
-	if _, err := client.Ping(metadata.AppendToOutgoingContext(ctx,
-		"authorization", "Bearer token-equivocado"), &pb.PingRequest{}); status.Code(err) != codes.Unauthenticated {
-		t.Fatalf("token inválido aceptado: %v", err)
+	// con el token correcto: 200.
+	req, err := http.NewRequest(http.MethodGet, base+"/v1/status", nil)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+testToken)
+	res, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("status con token: %v", err)
+	}
+	_ = res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("con token se esperaba 200, se obtuvo %d", res.StatusCode)
+	}
+
+	// token equivocado: 401.
+	req, err = http.NewRequest(http.MethodGet, base+"/v1/status", nil)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer token-equivocado")
+	res, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("status con token equivocado: %v", err)
+	}
+	_ = res.Body.Close()
+	if res.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("token inválido aceptado: %d", res.StatusCode)
 	}
 }
 
@@ -406,9 +433,8 @@ func TestUnavailableServerDoesNotBreakNextCommand(t *testing.T) {
 
 	agentCfg := config.DefaultAgent()
 	agentCfg.StationID = "CAJA-01"
-	agentCfg.Server.Address = addr
+	agentCfg.Server.Address = "http://" + addr
 	agentCfg.Server.Token = testToken
-	agentCfg.Server.DialTimeoutMS = 400
 	agentCfg.Server.RequestTimeoutMS = 900
 	agentCfg.Bridge.ReadGapMS = 20
 	agentCfg.Bridge.ResponseTimeoutMS = 5000

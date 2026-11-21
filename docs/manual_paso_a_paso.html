@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Spooler Fiscal — Manual paso a paso (servidor y cliente)</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --panel:#ffffff; --ink:#1c2330; --muted:#5b667a;
+    --line:#e2e6ee; --brand:#0f6b5c; --brand-ink:#0a4a40;
+    --server:#0f6b5c; --server-bg:#e8f5f1; --client:#1f5fbf; --client-bg:#e9f1fc;
+    --warn:#8a5a00; --warn-bg:#fff4d6; --danger:#a12a2a; --danger-bg:#fdeaea;
+    --code-bg:#0f172a; --code-ink:#e6edf7; --radius:14px;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#0f1420; --panel:#172031; --ink:#e8edf5; --muted:#9aa7bd;
+      --line:#263149; --brand:#4fd1b5; --brand-ink:#7fe3cd;
+      --server:#4fd1b5; --server-bg:#12312c; --client:#7fb0ff; --client-bg:#152a47;
+      --warn:#ffce6b; --warn-bg:#3a2c0c; --danger:#ff9a9a; --danger-bg:#3a1515;
+      --code-bg:#0a0f1c; --code-ink:#e6edf7;
+    }
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font:16px/1.65 "Segoe UI", system-ui, -apple-system, Roboto, Arial, sans-serif;
+  }
+  header.hero{
+    background:linear-gradient(135deg,#0f6b5c,#124e7a); color:#fff;
+    padding:38px 20px 30px; text-align:center;
+  }
+  header.hero h1{margin:0 0 8px; font-size:1.9rem; letter-spacing:.2px}
+  header.hero p{margin:4px auto; max-width:820px; opacity:.92}
+  header.hero .badges{margin-top:16px; display:flex; gap:10px; justify-content:center; flex-wrap:wrap}
+  .badge{display:inline-block; padding:4px 12px; border-radius:999px; font-size:.8rem; font-weight:600}
+  .badge.server{background:rgba(255,255,255,.16); border:1px solid rgba(255,255,255,.4)}
+  .badge.client{background:rgba(255,255,255,.16); border:1px solid rgba(255,255,255,.4)}
+  nav.toc{
+    background:var(--panel); border-bottom:1px solid var(--line);
+    padding:14px 20px; position:sticky; top:0; z-index:5;
+  }
+  nav.toc .inner{max-width:980px; margin:0 auto; display:flex; gap:8px; flex-wrap:wrap; justify-content:center}
+  nav.toc a{color:var(--ink); text-decoration:none; font-size:.88rem; padding:5px 10px; border-radius:8px; border:1px solid var(--line)}
+  nav.toc a:hover{border-color:var(--brand); color:var(--brand-ink)}
+  main{max-width:980px; margin:0 auto; padding:26px 18px 80px}
+  section{background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); padding:24px 26px; margin:22px 0; box-shadow:0 1px 2px rgba(10,20,40,.04)}
+  h2{font-size:1.35rem; margin:0 0 14px; padding-bottom:10px; border-bottom:2px solid var(--line)}
+  h3{font-size:1.1rem; margin:22px 0 10px}
+  h4{font-size:1rem; margin:16px 0 8px}
+  p{margin:10px 0}
+  ul,ol{margin:10px 0 10px 22px; padding:0}
+  li{margin:6px 0}
+  code{font-family:"Cascadia Code", Consolas, "Courier New", monospace; background:var(--code-bg); color:var(--code-ink); padding:2px 6px; border-radius:6px; font-size:.9em}
+  pre{background:var(--code-bg); color:var(--code-ink); border-radius:12px; padding:16px 18px; overflow:auto; font-family:"Cascadia Code", Consolas, "Courier New", monospace; font-size:.86rem; line-height:1.55}
+  pre code{background:none; color:inherit; padding:0}
+  pre .lang{color:#7dd3fc; font-size:.72rem; letter-spacing:.12em; text-transform:uppercase; display:block; margin-bottom:8px; opacity:.8}
+  .note,.tip,.warn,.danger{border-radius:12px; padding:12px 16px; margin:14px 0; border:1px solid transparent}
+  .note{background:var(--client-bg); border-color:color-mix(in srgb, var(--client) 35%, transparent)}
+  .tip{background:var(--server-bg); border-color:color-mix(in srgb, var(--server) 35%, transparent)}
+  .warn{background:var(--warn-bg); border-color:color-mix(in srgb, var(--warn) 35%, transparent)}
+  .danger{background:var(--danger-bg); border-color:color-mix(in srgb, var(--danger) 35%, transparent)}
+  .note strong,.tip strong,.warn strong,.danger strong{color:inherit}
+  .part{display:inline-block; font-size:.72rem; font-weight:700; letter-spacing:.12em; text-transform:uppercase; padding:3px 10px; border-radius:999px; margin-bottom:6px}
+  .part.server{background:var(--server-bg); color:var(--server); border:1px solid color-mix(in srgb, var(--server) 40%, transparent)}
+  .part.client{background:var(--client-bg); color:var(--client); border:1px solid color-mix(in srgb, var(--client) 40%, transparent)}
+  table{width:100%; border-collapse:collapse; margin:12px 0; font-size:.92rem}
+  th,td{text-align:left; padding:9px 10px; border-bottom:1px solid var(--line); vertical-align:top}
+  th{background:var(--bg); font-weight:600}
+  tr:last-child td{border-bottom:none}
+  .grid{display:grid; gap:12px; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); margin:14px 0}
+  .card{border:1px solid var(--line); border-radius:12px; padding:14px 16px; background:var(--bg)}
+  .card h4{margin:0 0 6px}
+  .step{display:flex; gap:12px; margin:14px 0}
+  .step .n{flex:0 0 30px; height:30px; border-radius:50%; background:var(--brand); color:#fff; display:flex; align-items:center; justify-content:center; font-weight:700}
+  .step .b{flex:1}
+  .step .b h4{margin:2px 0 4px}
+  footer{text-align:center; color:var(--muted); font-size:.85rem; padding:20px}
+  .pill{font-size:.78rem; padding:2px 8px; border-radius:999px; border:1px solid var(--line); color:var(--muted)}
+  .ok{color:var(--server); font-weight:700}
+  .bad{color:var(--danger); font-weight:700}
+  @media (max-width:640px){
+    section{padding:18px}
+    header.hero h1{font-size:1.5rem}
+  }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <h1>Spooler Fiscal — Manual paso a paso</h1>
+  <p>Lo que se hace en el <strong>servidor</strong> (la PC con la impresora) y lo que se hace en el <strong>cliente</strong> (la PC con Profit Plus).</p>
+  <p>Versión 1.0.0 · Impresora TFHKA por puerto serie · API HTTP · COM virtual con com0com.</p>
+  <div class="badges">
+    <span class="badge server">SERVIDOR: COM1 + HTTP 8080</span>
+    <span class="badge client">CLIENTE: COM3 + agente HTTP</span>
+  </div>
+</header>
+
+<nav class="toc">
+  <div class="inner">
+    <a href="#resumen">1. Resumen</a>
+    <a href="#requisitos">2. Requisitos</a>
+    <a href="#servidor">3. PARTE A — Servidor</a>
+    <a href="#cliente">4. PARTE B — Cliente</a>
+    <a href="#viaje">5. Viaje de una factura</a>
+    <a href="#operacion">6. Operación diaria</a>
+    <a href="#problemas">7. Problemas frecuentes</a>
+    <a href="#seguridad">8. Seguridad y respaldo</a>
+  </div>
+</nav>
+
+<main>
+
+<section id="resumen">
+  <h2>1. Resumen: qué es cada parte</h2>
+
+  <div class="grid">
+    <div class="card">
+      <h4><span class="part server">Servidor</span></h4>
+      <p>PC donde está conectada la <strong>impresora fiscal</strong> por cable serie.</p>
+      <ul>
+        <li>Abra el <strong>COM1</strong> y escribe en la impresora.</li>
+        <li>Mantiene la <strong>cola</strong> y el <strong>correlativo</strong>.</li>
+        <li>Guarda la <strong>auditoría</strong> en SQLite.</li>
+        <li>Publica una <strong>API HTTP en el puerto 8080</strong>.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h4><span class="part client">Cliente / estación</span></h4>
+      <p>PC donde corre <strong>Profit Plus</strong> (cada caja).</p>
+      <ul>
+        <li>Crea un <strong>COM virtual</strong> (com0com).</li>
+        <li>El agente lee ese COM y lo convierte en <strong>HTTP</strong>.</li>
+        <li>Habla con el servidor en el puerto <strong>8080</strong>.</li>
+        <li>Profit Plus cree que tiene una impresora en <strong>COM3</strong>.</li>
+      </ul>
+    </div>
+  </div>
+
+  <h3>Diagrama</h3>
+  <pre><span class="lang">arquitectura</span> CLIENTE (caja)                                    SERVIDOR (impresora)
+┌──────────────────────────────┐              ┌──────────────────────────────┐
+│ Profit Plus                  │              │ server.exe                   │
+│   └─ COM3 (virtual)          │              │   ├─ cola serializada        │
+│        ▲                     │              │   ├─ turno por factura       │
+│        │ par com0com         │   HTTP 8080  │   ├─ correlativo             │
+│        ▼                     │ ───────────► │   ├─ SQLite auditoría        │
+│ agent.exe ──► COM4 ──────────┼──────────────┤   └─ API HTTP /v1            │
+└──────────────────────────────┘              │            │                 │
+                                              │            ▼ COM1            │
+                                              │      Impresora TFHKA         │
+                                              └──────────────────────────────┘
+
+También por HTTP 8080: ecommerce · ERP web · CRM
+</pre>
+
+  <div class="note"><strong>Idea clave:</strong> el agente <strong>no interpreta</strong> el protocolo fiscal. Sólo transporta bytes entre el COM virtual y el servidor. Todo el criterio (turno, correlativo, papel, memoria) vive en el servidor, junto a la impresora.</div>
+</section>
+
+<section id="requisitos">
+  <h2>2. Requisitos</h2>
+  <ul>
+    <li><strong>Windows 10/11 o Windows Server 2019/2022</strong>, 64 bits.</li>
+    <li><strong>Servidor:</strong> impresora fiscal <strong>TFHKA / The Factory</strong> conectada por puerto serie (COM1) o adaptador USB-serie.</li>
+    <li><strong>Cliente:</strong> Profit Plus y el driver <strong>com0com</strong> (crea el puerto COM virtual).</li>
+    <li><strong>Go 1.26+</strong> sólo en la máquina donde compiles; los <code>.exe</code> no necesitan Go.</li>
+    <li>Permisos de <strong>administrador</strong> para instalar servicios, com0com y abrir el firewall.</li>
+    <li>Red local: el servidor debe alcanzar el COM1 y las estaciones deben alcanzar el puerto <strong>8080</strong> del servidor.</li>
+  </ul>
+  <div class="warn"><strong>Solo TFHKA.</strong> El único driver implementado es <code>tfhka</code> (The Factory HKA, protocolo ASCII). Otros modelos requerirían un driver nuevo.</div>
+</section>
+
+<section id="servidor">
+  <span class="part server">Parte A — Servidor</span>
+  <h2>3. Instalar y configurar el servidor</h2>
+
+  <h3>A.1 ¿Qué hace el servidor?</h3>
+  <ol>
+    <li>Abra el puerto <strong>COM1</strong> donde está la impresora fiscal.</li>
+    <li>Escucha la <strong>API HTTP en 8080</strong>.</li>
+    <li>Recibe comandos de los agentes y de sistemas externos, los <strong>encola</strong> y los ejecuta <strong>de uno en uno</strong>.</li>
+    <li>Aplica el <strong>turno por factura</strong>: la caja que abre una factura no la suelta hasta cerrarla.</li>
+    <li>Registra cada documento en <code>data\spooler.db</code> (auditoría).</li>
+  </ol>
+
+  <h3>A.2 Archivos que se usan</h3>
+  <pre><span class="lang">estructura sugerida en el servidor</span>C:\SpoolerFiscal\
+├─ bin\
+│   └─ server.exe
+├─ configs\
+│   └─ server.yaml
+├─ data\          ← la crea el servicio (base SQLite)
+└─ logs\          ← la crea el servicio (server.log)
+</pre>
+
+  <h3>A.3 Configurar <code>server.yaml</code></h3>
+  <p>Copia <code>configs\server.yaml</code> del repositorio y ajusta como mínimo el <strong>token</strong> y el <strong>COM</strong>:</p>
+  <pre><span class="lang">server.yaml</span>token: CAMBIAR-ESTE-TOKEN        # el mismo que usarán todos los agentes
+
+printer:
+  driver: tfhka
+  transport: serial             # serial = impresora física (tcp = laboratorio)
+  port:
+    name: COM1                  # puerto real de la impresora
+    baud_rate: 9600
+    data_bits: 8
+    parity: none
+    stop_bits: "1"
+    flow_control: none
+  command_terminator: "\r\n"    # CR+LF: con CR solo la TFHKA no responde
+  response_timeout_ms: 20000
+
+http:
+  listen: 0.0.0.0:8080          # único puerto: agentes y sistemas externos
+
+database:
+  path: data/spooler.db         # relativo al directorio de trabajo del servicio</pre>
+
+  <div class="warn"><strong>Claves eliminadas.</strong> Si tu <code>server.yaml</code> viene de una versión anterior, <strong>borra</strong> estas líneas o el servidor rechazará el archivo: <code>listen</code>, <code>session_ttl_minutes</code>, <code>http.enabled</code>. Ya no existen.</div>
+
+  <h3>A.4 Probar en consola (antes de instalar el servicio)</h3>
+  <div class="step"><div class="n">1</div><div class="b">
+    <h4>Detén el servicio si estaba corriendo</h4>
+    <pre><span class="lang">powershell</span>sc stop SpoolerFiscalServer</pre>
+  </div></div>
+  <div class="step"><div class="n">2</div><div class="b">
+    <h4>Ejecuta en primer plano</h4>
+    <pre><span class="lang">powershell</span>cd C:\SpoolerFiscal
+.\bin\server.exe -console -config .\configs\server.yaml</pre>
+  </div></div>
+  <div class="step"><div class="n">3</div><div class="b">
+    <h4>Debes ver algo así</h4>
+    <pre><span class="lang">log</span>iniciando spooler fiscal version=1.0.0 config=C:\SpoolerFiscal\configs\server.yaml
+impresora fiscal configurada driver=tfhka transporte=serial destino=COM1 @ 9600 8N1
+cola de impresión iniciada max_pendientes=256 driver=tfhka
+spooler fiscal escuchando addr=[::]:8080 tls=false driver=tfhka
+api HTTP escuchando addr=[::]:8080 docs=/docs/API.md</pre>
+    <p>Si ves <code>reintentando abrir la impresora</code>, revisa que el COM1 sea el correcto y que la impresora esté encendida.</p>
+  </div></div>
+
+  <h3>A.5 Abrir el puerto en el firewall</h3>
+  <pre><span class="lang">powershell (administrador)</span>New-NetFirewallRule -DisplayName "Spooler Fiscal HTTP" -Direction Inbound -Protocol TCP -LocalPort 8080 -Action Allow</pre>
+
+  <h3>A.6 Instalar como servicio de Windows</h3>
+  <pre><span class="lang">powershell (administrador)</span>.\scripts\install-server.ps1 -Root C:\SpoolerFiscal
+sc start SpoolerFiscalServer</pre>
+  <p>El servicio arranca solo al encender la PC y se reinicia si falla.</p>
+
+  <h3>A.7 Verificar que responde</h3>
+  <pre><span class="lang">bash</span>curl http://127.0.0.1:8080/v1/health
+# {"status":"ok","version":"1.0.0","protocol_version":1,"driver":"tfhka", ...}
+
+curl -H "Authorization: Bearer CAMBIAR-ESTE-TOKEN" http://127.0.0.1:8080/v1/status</pre>
+  <div class="tip"><code>/v1/health</code> es público. Todas las demás rutas exigen el token.</div>
+
+  <h3>A.8 Dónde mirar si algo falla</h3>
+  <ul>
+    <li><code>logs\server.log</code> — arranque, errores de impresora, documentos emitidos.</li>
+    <li>En el log debes ver <code>documento fiscal registrado</code> al emitir una factura.</li>
+    <li>Cada minuto escribe una línea <code>métricas</code> (documentos, cola, estado).</li>
+  </ul>
+</section>
+
+<section id="cliente">
+  <span class="part client">Parte B — Cliente / estación</span>
+  <h2>4. Instalar y configurar el cliente (Profit Plus)</h2>
+
+  <h3>B.1 ¿Qué hace el cliente?</h3>
+  <ol>
+    <li>Crea un <strong>par de puertos COM virtuales</strong> con com0com: <code>COM3</code> ↔ <code>COM4</code>.</li>
+    <li><strong>Profit Plus</strong> se configura contra <code>COM3</code> (9600 8N1).</li>
+    <li><strong>agent.exe</strong> abre <code>COM4</code>, lee las tramas y las envía por <strong>HTTP</strong> al servidor.</li>
+    <li>El servidor devuelve la respuesta de la impresora y el agente la escribe en <code>COM4</code>.</li>
+  </ol>
+  <div class="tip"><strong>Resultado:</strong> Profit Plus ve una impresora fiscal normal en COM3, pero en realidad está hablando por la red con el servidor.</div>
+
+  <h3>B.2 Crear el par de puertos virtuales (com0com)</h3>
+  <div class="step"><div class="n">1</div><div class="b">
+    <h4>Instalar com0com</h4>
+    <p>Descárgalo de <code>https://sourceforge.net/projects/com0com/</code> e instálalo.</p>
+  </div></div>
+  <div class="step"><div class="n">2</div><div class="b">
+    <h4>Crear el par con el script del proyecto</h4>
+    <pre><span class="lang">powershell (administrador)</span>.\scripts\setup-com0com.ps1 -ProfitPort COM3 -AgentPort COM4</pre>
+    <p>Equivalentes manuales:</p>
+    <pre><span class="lang">cmd</span>"C:\Program Files (x86)\com0com\setupc.exe" install PortName=COM3 PortName=COM4</pre>
+  </div></div>
+  <div class="step"><div class="n">3</div><div class="b">
+    <h4>Comprobar el par</h4>
+    <p>En el <strong>Administrador de dispositivos → Puertos (COM y LPT)</strong> deben aparecer <code>COM3</code> y <code>COM4</code> emparejados.</p>
+  </div></div>
+  <div class="warn">Si <code>COM3</code>/<code>COM4</code> están ocupados, usa otros (por ejemplo <code>COM11</code>/<code>COM12</code>) y ajusta el <code>agent.yaml</code> y Profit Plus.</div>
+
+  <h3>B.3 Archivos que se usan</h3>
+  <pre><span class="lang">estructura sugerida en la estación</span>C:\SpoolerFiscal\
+├─ bin\
+│   └─ agent.exe
+├─ configs\
+│   └─ agent.yaml
+└─ logs\          ← la crea el servicio (agent.log)
+</pre>
+
+  <h3>B.4 Configurar <code>agent.yaml</code></h3>
+  <pre><span class="lang">agent.yaml</span>station_id: CAJA-01                 # único por estación (aparece en la auditoría)
+
+server:
+  address: http://192.168.1.10:8080   # URL de la API del servidor
+  token: CAMBIAR-ESTE-TOKEN           # el mismo del servidor
+  request_timeout_ms: 30000
+
+virtual_com:
+  name: COM4                          # extremo del agente (Profit Plus usa COM3)
+  baud_rate: 9600
+  data_bits: 8
+  parity: none
+  stop_bits: "1"
+  flow_control: none
+
+bridge:
+  read_gap_ms: 30
+  response_timeout_ms: 15000
+  offline_response_hex: ""            # vacío = Profit Plus ve timeout
+  log_hex_payloads: false             # true = registra bytes en hexadecimal
+
+logging:
+  level: info
+  file: logs/agent.log
+  console: true                       # false cuando corra como servicio</pre>
+  <div class="warn"><strong>Claves eliminadas.</strong> Si tu <code>agent.yaml</code> es antiguo, borra <code>dial_timeout_ms</code>. Ya no existe.</div>
+
+  <h3>B.5 Probar el agente en consola</h3>
+  <pre><span class="lang">powershell</span>.\bin\agent.exe -console -config .\configs\agent.yaml</pre>
+  <p>Debes ver:</p>
+  <pre><span class="lang">log</span>agente iniciado estacion=CAJA-01 servidor=http://192.168.1.10:8080 com_virtual=COM4
+COM virtual abierto puerto=COM4 baudios=9600 trama=8N1
+conectado al spooler servidor=http://192.168.1.10:8080</pre>
+  <div class="tip">El agente no necesita que el servidor exista al arrancar: si no está, lo reintentará solo cada 30 s y avisará <code>conectado al spooler</code> cuando aparezca.</div>
+
+  <h3>B.6 Apuntar Profit Plus</h3>
+  <ol>
+    <li>Impresora fiscal: marca <strong>The Factory</strong> / protocolo <strong>TFHKA</strong>.</li>
+    <li>Puerto: <strong>COM3</strong>.</li>
+    <li>Velocidad: <strong>9600</strong>, 8 datos, sin paridad, 1 bit de parada.</li>
+    <li>Control de flujo: <strong>ninguno</strong>.</li>
+  </ol>
+  <p>Detalle por versión en <code>docs\PROFITPLUS.md</code>.</p>
+
+  <h3>B.7 Instalar el agente como servicio</h3>
+  <pre><span class="lang">powershell (administrador)</span>.\scripts\install-agent.ps1 -Root C:\SpoolerFiscal
+sc start SpoolerFiscalAgent</pre>
+
+  <h3>B.8 Verificar de extremo a extremo</h3>
+  <ol>
+    <li>En el servidor, <code>logs\server.log</code> debe aparecer <code>sesión</code>/<code>documento</code> al usar Profit Plus.</li>
+    <li>Emita una factura de prueba desde Profit Plus.</li>
+    <li>En el servidor debe aparecer <code>documento fiscal registrado</code> con tipo, número y estación.</li>
+    <li>En la estación, el agente registra <code>documento registrado por el spooler</code>.</li>
+  </ol>
+</section>
+
+<section id="viaje">
+  <h2>5. El viaje de una factura, paso a paso</h2>
+  <ol>
+    <li><strong>Profit Plus escribe en COM3</strong> el primer comando de la factura (la primera línea de ítem abre el documento).</li>
+    <li><strong>com0com</strong> entrega esa trama por <strong>COM4</strong>.</li>
+    <li><strong>agent.exe</strong> lee la trama (la delimita por silencio, sin interpretarla) y hace un <code>POST /v1/commands</code> al servidor con los bytes en base64.</li>
+    <li><strong>server.exe</strong> encola el comando. Si otra caja tiene el turno, espera.</li>
+    <li>El servidor escribe el comando en el <strong>COM1</strong> y lee la respuesta íntegra de la impresora.</li>
+    <li>El servidor registra el documento si corresponde (tipo, número, hashes, estación) y devuelve la respuesta.</li>
+    <li><strong>agent.exe</strong> recibe la respuesta y la escribe en <strong>COM4</strong>.</li>
+    <li><strong>com0com</strong> la entrega a <strong>COM3</strong> y <strong>Profit Plus</strong> la lee como si viniera de su impresora.</li>
+    <li>Al enviar Profit Plus el cierre <code>101</code>, se repite el viaje y el servidor libera el turno para la siguiente factura.</li>
+  </ol>
+  <div class="note"><strong>Un solo escritor:</strong> sólo el servidor escribe en la impresora. Nunca hay dos cajas escribiendo a la vez.</div>
+</section>
+
+<section id="operacion">
+  <h2>6. Operación diaria</h2>
+
+  <h3>Servicios</h3>
+  <table>
+    <thead><tr><th>Servicio</th><th>Máquina</th><th>Binario</th></tr></thead>
+    <tbody>
+      <tr><td><code>SpoolerFiscalServer</code></td><td>PC con la impresora</td><td><code>server.exe</code></td></tr>
+      <tr><td><code>SpoolerFiscalAgent</code></td><td>Cada estación</td><td><code>agent.exe</code></td></tr>
+    </tbody>
+  </table>
+  <pre><span class="lang">powershell</span>sc query SpoolerFiscalServer
+sc stop SpoolerFiscalServer
+sc start SpoolerFiscalServer
+sc query SpoolerFiscalAgent
+sc stop SpoolerFiscalAgent
+sc start SpoolerFiscalAgent</pre>
+
+  <h3>Estado y monitoreo</h3>
+  <pre><span class="lang">bash</span>curl http://127.0.0.1:8080/v1/health
+curl -H "Authorization: Bearer &lt;token&gt;" http://127.0.0.1:8080/v1/status</pre>
+  <p><code>/v1/status</code> devuelve: impresora (online, papel, memoria), cola, documento abierto, propietario del turno y motivo de bloqueo.</p>
+
+  <h3>Logs</h3>
+  <ul>
+    <li>Servidor: <code>logs\server.log</code> (rotación: 20 MB, 10 copias, 30 días).</li>
+    <li>Agente: <code>logs\agent.log</code>.</li>
+    <li>Nivel: <code>level: debug | info | warn | error</code> en el YAML.</li>
+  </ul>
+
+  <h3>Orden de arranque tras un apagón</h3>
+  <ol>
+    <li>Enciende la impresora y verifica el papel.</li>
+    <li>Arranca el <strong>servidor</strong> (servicio automático).</li>
+    <li>Arrancan las <strong>estaciones</strong> (servicios automáticos); el agente se reconecta solo.</li>
+  </ol>
+</section>
+
+<section id="problemas">
+  <h2>7. Problemas frecuentes</h2>
+
+  <h3>En el servidor</h3>
+  <table>
+    <thead><tr><th>Síntoma</th><th>Causa probable</th><th>Qué hacer</th></tr></thead>
+    <tbody>
+      <tr><td><code>reintentando abrir la impresora</code> cada 0,5 s</td><td>Nada escucha en el puerto configurado</td><td>Con <code>transport: serial</code>, revisa <code>printer.port.name</code> (COM1) y que la impresora esté encendida. Si usaste <code>transport: tcp</code>, ese modo es de laboratorio: vuelve a <code>serial</code>.</td></tr>
+      <tr><td>Error de clave desconocida al arrancar</td><td>YAML con campos viejos</td><td>Borra <code>listen</code>, <code>session_ttl_minutes</code> y <code>http.enabled</code>.</td></tr>
+      <tr><td>El servicio no escucha en 8080</td><td>Puerto ocupado o <code>http.listen</code> vacío</td><td>Revisa <code>http.listen</code> y con <code>netstat -ano | findstr :8080</code> quién lo ocupa.</td></tr>
+      <tr><td><code>401 unauthorized</code> desde el agente</td><td>Token distinto</td><td>Iguala <code>token</code> en servidor y agentes (o usa <code>SPOOLER_TOKEN</code>).</td></tr>
+      <tr><td><code>403</code> estación no autorizada</td><td><code>allowed_stations</code> no incluye el <code>station_id</code></td><td>Agrega la estación o deja la lista vacía.</td></tr>
+      <tr><td><code>409 printer_blocked</code></td><td>Papel agotado, memoria llena o error fiscal</td><td>Resuelve en la impresora; el bloqueo se libera con la siguiente respuesta limpia.</td></tr>
+      <tr><td><code>504 timeout</code></td><td>La cola esperó demasiado</td><td>Sube <code>queue.default_timeout_ms</code> (60–90 s con ráfagas).</td></tr>
+    </tbody>
+  </table>
+
+  <h3>En el cliente / estación</h3>
+  <table>
+    <thead><tr><th>Síntoma</th><th>Causa probable</th><th>Qué hacer</th></tr></thead>
+    <tbody>
+      <tr><td><code>Serial port not found</code> / <code>no se pudo abrir COM4</code></td><td>com0com no instalado o par no creado</td><td>Crea el par con <code>setup-com0com.ps1</code> y verifica que <code>virtual_com.name</code> sea el extremo del agente.</td></tr>
+      <tr><td>Profit Plus dice "impresora fiscal no responde"</td><td>Agente caído, servidor inalcanzable o token distinto</td><td><code>sc query SpoolerFiscalAgent</code>; <code>Test-NetConnection IP-SERVIDOR -Port 8080</code>; compara tokens.</td></tr>
+      <tr><td>El agente no conecta con el servidor</td><td>Puerto 8080 cerrado o URL mal</td><td>Verifica <code>server.address</code> (<code>http://IP:8080</code>) y el firewall del servidor.</td></tr>
+      <tr><td>Profit Plus no imprime pero el agente está vivo</td><td>Otro programa tiene abierto COM3, o los parámetros no coinciden</td><td>Cierra el otro programa y usa 9600 8N1 sin control de flujo en ambos extremos.</td></tr>
+      <tr><td>Facturas de dos cajas mezcladas</td><td>Dos servidores sobre la misma impresora</td><td>Un solo servidor por impresora.</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="seguridad">
+  <h2>8. Seguridad, respaldo y actualización</h2>
+
+  <h3>Seguridad</h3>
+  <ul>
+    <li><strong>Token:</strong> cámbialo en producción. Es la única credencial. Puedes usar <code>SPOOLER_TOKEN</code> y no escribirlo en el YAML.</li>
+    <li><strong>Firewall:</strong> abre sólo el <strong>8080</strong> hacia la red de la empresa. No expongas la API a Internet.</li>
+    <li><strong>HTTPS:</strong> activa <code>tls.enabled</code> con <code>cert_file</code> y <code>key_file</code> si la red no es de confianza.</li>
+    <li><strong>Permisos:</strong> el servicio restringe el acceso al YAML y a <code>data\</code>. No los copias a equipos de usuarios.</li>
+    <li><strong>Lista blanca:</strong> <code>allowed_stations</code> limita qué estaciones pueden imprimir.</li>
+  </ul>
+
+  <h3>Respaldo</h3>
+  <p>La base <code>data\spooler.db</code> es la evidencia del correlativo. Respáldala con el servicio detenido (o en caliente, SQLite en WAL mantiene consistencia):</p>
+  <pre><span class="lang">powershell</span>sc stop SpoolerFiscalServer
+Copy-Item data\spooler.db "\\backup\spooler-$(Get-Date -Format yyyyMMdd).db"
+sc start SpoolerFiscalServer</pre>
+
+  <h3>Actualización</h3>
+  <ol>
+    <li>Detén los servicios.</li>
+    <li>Respalda <code>data\</code> y <code>configs\</code>.</li>
+    <li>Reemplaza <code>server.exe</code> y <code>agent.exe</code> (misma versión en todos lados).</li>
+    <li>Arranca primero el servidor y luego los agentes.</li>
+    <li>Verifica <code>/v1/health</code> y una factura de prueba.</li>
+  </ol>
+
+  <div class="danger"><strong>No reemplaces la impresora sin documentarlo.</strong> Cambiar la numeración invalida la auditoría: registra el cambio y respalda la base.</div>
+</section>
+
+<footer>
+  Spooler Fiscal · manual paso a paso · <code>docs\manual_paso_a_paso.html</code><br>
+  También disponible el manual general en <code>docs\manual.html</code> y el contrato en <code>api\openapi.yaml</code>.
+</footer>
+
+</main>
+</body>
+</html>

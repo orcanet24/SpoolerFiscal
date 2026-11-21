@@ -67,7 +67,7 @@ haya.
 
 ## API REST
 
-Con `http.enabled: true`, `GET /v1/health` sirve para monitoreo y
+`GET /v1/health` sirve para monitoreo y
 `GET /v1/status` devuelve cola, documento abierto y motivo de bloqueo. La emisión
 externa usa `POST /v1/invoices` (líneas TFHKA) o `/v1/invoices/structured` (ítems
 JSON); cada factura retiene el turno hasta el `101`,
@@ -115,7 +115,7 @@ respáldela antes de cualquier actualización.
 | Síntoma | Causa probable | Solución |
 | --- | --- | --- |
 | `no se pudo abrir el COM virtual` en el agente | com0com no instalado, par no creado o puerto usado por otra app | `setupc list`; cierre la app que lo usa; revise `virtual_com.name` |
-| Profit Plus dice "impresora fiscal no responde" | agente caído, servidor inalcanzable o token distinto | `sc query SpoolerFiscalAgent`; pruebe `telnet IP 5050`; compare tokens |
+| Profit Plus dice "impresora fiscal no responde" | agente caído, servidor inalcanzable o token distinto | `sc query SpoolerFiscalAgent`; pruebe `telnet IP 8080`; compare tokens |
 | `token de estación inválido` | token distinto entre agente y servidor | iguale `server.token` o `SPOOLER_TOKEN` |
 | `estación no autorizada` | `allowed_stations` no incluye el `station_id` | agréguelo o vacíe la lista |
 | `emisión bloqueada: PAPER_OUT` | la impresora reportó fin de papel | cargue papel; el bloqueo se libera con la siguiente respuesta limpia |

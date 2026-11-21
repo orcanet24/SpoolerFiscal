@@ -108,9 +108,9 @@ func logMetrics(ctx context.Context, logger *slog.Logger, ag *agent.Agent) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			frames, errs, reconnects, retries := ag.Stats()
+			frames, errs, retries := ag.Stats()
 			logger.Info("métricas del agente", "tramas", frames, "errores", errs,
-				"reconexiones", reconnects, "reintentos_sesion", retries)
+				"reintentos_red", retries)
 		}
 	}
 }

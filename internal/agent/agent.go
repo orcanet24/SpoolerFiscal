@@ -1,36 +1,31 @@
-// Package agent contiene el cliente gRPC del servicio de estación: mantiene la
-// sesión con el spooler, reintenta mientras el servidor no esté disponible y
-// reenvía bytes fiscales sin interpretarlos.
+// Package agent contiene el cliente HTTP del servicio de estación: mantiene el
+// puente entre el COM virtual que ve Profit Plus y la API del spooler central.
+// Reenvía los bytes fiscales sin interpretarlos y devuelve la respuesta real.
 package agent
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
+	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/metadata"
-	"google.golang.org/grpc/status"
-
 	"spoolerfiscal/internal/config"
-	pb "spoolerfiscal/proto/spooler/v1"
 )
 
 // Version del binario agente.
 const Version = "1.0.0"
-
-// serverProtocolVersion es la versión del contrato gRPC que entiende este agente.
-const serverProtocolVersion uint32 = 1
 
 // Errores del agente.
 var (
@@ -52,21 +47,40 @@ type result struct {
 	err  error
 }
 
-// Agent es el cliente del spooler en una estación.
+// commandResponse es el contrato de POST /v1/commands del spooler.
+type commandResponse struct {
+	Station        string `json:"station"`
+	Session        string `json:"session"`
+	Response       string `json:"response"`
+	ResponseBase64 string `json:"response_base64"`
+	Sequence       int64  `json:"sequence"`
+	QueueWaitMS    int64  `json:"queue_wait_ms"`
+	LatencyMS      int64  `json:"latency_ms"`
+	Status         struct {
+		Blocked       bool   `json:"blocked"`
+		BlockedReason string `json:"blocked_reason"`
+	} `json:"status"`
+	Document *struct {
+		DocType   string `json:"doc_type"`
+		DocNumber int64  `json:"doc_number"`
+		Sequence  int64  `json:"sequence"`
+		Duplicate bool   `json:"duplicate"`
+	} `json:"document"`
+}
+
+// Agent es el cliente HTTP del spooler en una estación.
 type Agent struct {
-	cfg     config.Agent
-	log     *slog.Logger
-	jobs    chan *request
-	seq     atomic.Uint64
-	frames  atomic.Uint64
-	errs    atomic.Uint64
-	reconns atomic.Uint64
+	cfg    config.Agent
+	log    *slog.Logger
+	jobs   chan *request
+	seq    atomic.Uint64
+	frames atomic.Uint64
+	errs   atomic.Uint64
 	retries atomic.Uint64
 
-	mu        sync.Mutex
-	conn      *grpc.ClientConn
-	client    pb.FiscalSpoolerClient
-	sessionID string
+	client  *http.Client
+	baseURL string
+	online  atomic.Bool
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -82,37 +96,56 @@ func New(cfg config.Agent, log *slog.Logger) *Agent {
 	if size <= 0 {
 		size = 16
 	}
-	return &Agent{cfg: cfg, log: log, jobs: make(chan *request, size)}
+	timeout := time.Duration(cfg.Server.RequestTimeoutMS) * time.Millisecond
+	if timeout <= 0 {
+		timeout = 30 * time.Second
+	}
+	client := &http.Client{Timeout: timeout}
+	if cfg.Server.TLS.Enabled {
+		tlsCfg := &tls.Config{MinVersion: tls.VersionTLS12}
+		if cfg.Server.TLS.CAFile != "" {
+			pem, err := os.ReadFile(cfg.Server.TLS.CAFile)
+			if err != nil {
+				log.Error("no se pudo leer la CA del spooler", "error", err)
+			} else {
+				pool := x509.NewCertPool()
+				if !pool.AppendCertsFromPEM(pem) {
+					log.Error("CA del spooler inválida", "archivo", cfg.Server.TLS.CAFile)
+				} else {
+					tlsCfg.RootCAs = pool
+				}
+			}
+		}
+		client.Transport = &http.Transport{TLSClientConfig: tlsCfg}
+	}
+	return &Agent{
+		cfg: cfg, log: log, jobs: make(chan *request, size),
+		client: client, baseURL: normalizeBase(cfg.Server.Address),
+	}
 }
 
-// Start lanza el worker que serializa los reenvíos.
+// Start lanza el worker que serializa los reenvíos y la sonda de salud.
 func (a *Agent) Start(ctx context.Context) error {
 	a.ctx, a.cancel = context.WithCancel(ctx)
-	a.wg.Add(1)
+	a.wg.Add(2)
 	go a.worker()
-	a.log.Info("agente iniciado", "estacion", a.cfg.StationID, "servidor", a.cfg.Server.Address,
+	go a.healthLoop()
+	a.log.Info("agente iniciado", "estacion", a.cfg.StationID, "servidor", a.baseURL,
 		"com_virtual", a.cfg.VirtualCOM.Name, "cola_local", cap(a.jobs))
 	return nil
 }
 
-// Close cierra la conexión y espera al worker.
+// Close detiene el worker y la sonda.
 func (a *Agent) Close() {
 	if a.cancel != nil {
 		a.cancel()
 	}
 	a.wg.Wait()
-	a.mu.Lock()
-	conn := a.conn
-	a.conn, a.client, a.sessionID = nil, nil, ""
-	a.mu.Unlock()
-	if conn != nil {
-		_ = conn.Close()
-	}
 }
 
 // Stats devuelve contadores para el log periódico.
-func (a *Agent) Stats() (frames, errs, reconnects, retries uint64) {
-	return a.frames.Load(), a.errs.Load(), a.reconns.Load(), a.retries.Load()
+func (a *Agent) Stats() (frames, errs, retries uint64) {
+	return a.frames.Load(), a.errs.Load(), a.retries.Load()
 }
 
 // Forward entrega una trama al spooler y devuelve la respuesta cruda.
@@ -157,9 +190,10 @@ func (a *Agent) worker() {
 	}
 }
 
-// dispatch espera al servidor con backoff mientras no haya conexión. Una vez
-// que el comando salió hacia el servidor NO se reenvía: un reenvío podría
-// imprimir dos veces la misma factura.
+// dispatch reintenta mientras el servidor no esté disponible. Cada intento
+// viaja con la misma Idempotency-Key (la referencia del comando): si la
+// petición anterior llegó y el spooler la ejecutó, el reintento recibe la
+// misma respuesta y no se imprime dos veces.
 func (a *Agent) dispatch(ctx context.Context, req *request) ([]byte, error) {
 	backoff := 100 * time.Millisecond
 	maxBackoff := time.Duration(a.cfg.Bridge.MaxSendBackoffMS) * time.Millisecond
@@ -168,7 +202,7 @@ func (a *Agent) dispatch(ctx context.Context, req *request) ([]byte, error) {
 	}
 	var lastErr error
 
-	for attempt := 0; ; attempt++ {
+	for {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
@@ -180,36 +214,17 @@ func (a *Agent) dispatch(ctx context.Context, req *request) ([]byte, error) {
 			return nil, fmt.Errorf("%w: %v", ErrUnavailable, lastErr)
 		}
 
-		client, err := a.clientFor(ctx)
-		if err != nil {
-			lastErr = err
-			a.sleep(ctx, &backoff, maxBackoff, req.deadline)
-			continue
-		}
-
-		session, err := a.ensureSession(ctx, client)
-		if err != nil {
-			lastErr = err
-			a.dropConnection()
-			a.sleep(ctx, &backoff, maxBackoff, req.deadline)
-			continue
-		}
-
 		remaining := time.Until(req.deadline)
 		if remaining <= 0 {
 			continue
 		}
 		callCtx, cancel := context.WithTimeout(ctx, remaining)
-		resp, err := client.SendCommand(a.auth(callCtx), &pb.CommandRequest{
-			SessionId: session,
-			Command:   req.frame,
-			TimeoutMs: uint32(remaining.Milliseconds()),
-			ClientRef: req.ref,
-		})
+		status, resp, err := a.send(callCtx, req)
 		cancel()
+
 		if err == nil {
 			a.frames.Add(1)
-			if resp.Status != nil && resp.Status.Blocked {
+			if resp.Status.Blocked {
 				a.log.Warn("el spooler reporta impresora bloqueada",
 					"motivo", resp.Status.BlockedReason, "ref", req.ref)
 			}
@@ -218,27 +233,103 @@ func (a *Agent) dispatch(ctx context.Context, req *request) ([]byte, error) {
 					"numero", resp.Document.DocNumber, "secuencia", resp.Document.Sequence,
 					"duplicado", resp.Document.Duplicate)
 			}
-			return resp.Response, nil
+			return decodeResponse(resp)
 		}
 
 		lastErr = err
-		// Sesión inexistente: el servidor rechazó antes de encolar, es seguro
-		// volver a abrir sesión y reenviar.
-		if status.Code(err) == codes.NotFound {
-			a.retries.Add(1)
-			a.resetSession()
-			a.log.Warn("sesión inválida, reabriendo", "ref", req.ref, "error", err)
-			continue
+		if status != 0 && !retryableStatus(status) {
+			a.errs.Add(1)
+			a.log.Error("el spooler rechazó el comando; no se reintenta",
+				"ref", req.ref, "http", status, "error", err)
+			return nil, err
 		}
-
-		a.errs.Add(1)
-		a.log.Error("fallo al reenviar el comando; no se reintenta para evitar doble emisión",
-			"ref", req.ref, "codigo", status.Code(err).String(), "error", err)
-		if status.Code(err) == codes.Unavailable {
-			a.dropConnection()
-		}
-		return nil, err
+		a.retries.Add(1)
+		a.sleep(ctx, &backoff, maxBackoff, req.deadline)
 	}
+}
+
+// send ejecuta un POST /v1/commands. Devuelve el código HTTP (0 si no hubo
+// respuesta) y el error de transporte o de estado.
+func (a *Agent) send(ctx context.Context, req *request) (int, *commandResponse, error) {
+	timeoutMS := a.cfg.Server.RequestTimeoutMS
+	if timeoutMS <= 0 {
+		timeoutMS = 30000
+	}
+	body, err := json.Marshal(map[string]any{
+		"station":        a.cfg.StationID,
+		"command_base64": base64.StdEncoding.EncodeToString(req.frame),
+		"client_ref":     req.ref,
+		"timeout_ms":     timeoutMS,
+	})
+	if err != nil {
+		return 0, nil, err
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, a.baseURL+"/v1/commands", bytes.NewReader(body))
+	if err != nil {
+		return 0, nil, err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Authorization", "Bearer "+a.cfg.Server.Token)
+	// La referencia del comando es la clave de idempotencia: un reintento por
+	// red no puede duplicar la emisión.
+	httpReq.Header.Set("Idempotency-Key", req.ref)
+
+	res, err := a.client.Do(httpReq)
+	if err != nil {
+		return 0, nil, err
+	}
+	defer func() { _ = res.Body.Close() }()
+	data, err := io.ReadAll(io.LimitReader(res.Body, 4<<20))
+	if err != nil {
+		return res.StatusCode, nil, err
+	}
+	if res.StatusCode != http.StatusOK {
+		return res.StatusCode, nil, fmt.Errorf("%s", errorMessage(data, res.StatusCode))
+	}
+	var out commandResponse
+	if err := json.Unmarshal(data, &out); err != nil {
+		return res.StatusCode, nil, fmt.Errorf("respuesta del spooler inválida: %w", err)
+	}
+	return res.StatusCode, &out, nil
+}
+
+// healthLoop registra el cambio de conectividad contra la API del spooler.
+func (a *Agent) healthLoop() {
+	defer a.wg.Done()
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-a.ctx.Done():
+			return
+		case <-ticker.C:
+			ok := a.health()
+			if ok != a.online.Load() {
+				a.online.Store(ok)
+				if ok {
+					a.log.Info("conectado al spooler", "servidor", a.baseURL)
+				} else {
+					a.log.Warn("spooler no disponible; se reintentará", "servidor", a.baseURL)
+				}
+			}
+		}
+	}
+}
+
+func (a *Agent) health() bool {
+	ctx, cancel := context.WithTimeout(a.ctx, 5*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, a.baseURL+"/v1/health", nil)
+	if err != nil {
+		return false
+	}
+	res, err := a.client.Do(req)
+	if err != nil {
+		return false
+	}
+	_ = res.Body.Close()
+	return res.StatusCode == http.StatusOK
 }
 
 func (a *Agent) sleep(ctx context.Context, backoff *time.Duration, maxBackoff time.Duration, deadline time.Time) {
@@ -262,135 +353,53 @@ func (a *Agent) sleep(ctx context.Context, backoff *time.Duration, maxBackoff ti
 	}
 }
 
-func (a *Agent) auth(ctx context.Context) context.Context {
-	if a.cfg.Server.Token == "" {
-		return ctx
-	}
-	return metadata.AppendToOutgoingContext(ctx, "authorization", "Bearer "+a.cfg.Server.Token)
-}
-
-func (a *Agent) clientFor(ctx context.Context) (pb.FiscalSpoolerClient, error) {
-	a.mu.Lock()
-	if a.client != nil {
-		c := a.client
-		a.mu.Unlock()
-		return c, nil
-	}
-	a.mu.Unlock()
-
-	opts, err := a.dialOptions()
-	if err != nil {
-		return nil, err
-	}
-	conn, err := grpc.NewClient(a.cfg.Server.Address, opts...)
-	if err != nil {
-		return nil, fmt.Errorf("crear cliente gRPC: %w", err)
-	}
-	client := pb.NewFiscalSpoolerClient(conn)
-
-	dialTimeout := time.Duration(a.cfg.Server.DialTimeoutMS) * time.Millisecond
-	if dialTimeout <= 0 {
-		dialTimeout = 3 * time.Second
-	}
-	pingCtx, cancel := context.WithTimeout(ctx, dialTimeout)
-	defer cancel()
-	ping, err := client.Ping(a.auth(pingCtx), &pb.PingRequest{ClientVersion: Version})
-	if err != nil {
-		_ = conn.Close()
-		return nil, fmt.Errorf("ping al spooler: %w", err)
-	}
-	if ping.ProtocolVersion != serverProtocolVersion {
-		_ = conn.Close()
-		return nil, fmt.Errorf("versión de protocolo incompatible: servidor %d, agente %d",
-			ping.ProtocolVersion, serverProtocolVersion)
-	}
-
-	a.mu.Lock()
-	a.conn = conn
-	a.client = client
-	a.mu.Unlock()
-	a.reconns.Add(1)
-	a.log.Info("conectado al spooler", "servidor", a.cfg.Server.Address,
-		"version_servidor", ping.ServerVersion, "driver", ping.PrinterDriver)
-	return client, nil
-}
-
-func (a *Agent) ensureSession(ctx context.Context, client pb.FiscalSpoolerClient) (string, error) {
-	a.mu.Lock()
-	if a.sessionID != "" {
-		id := a.sessionID
-		a.mu.Unlock()
-		return id, nil
-	}
-	a.mu.Unlock()
-
-	timeout := time.Duration(a.cfg.Server.DialTimeoutMS) * time.Millisecond
-	if timeout <= 0 {
-		timeout = 3 * time.Second
-	}
-	callCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	resp, err := client.OpenSession(a.auth(callCtx), &pb.OpenSessionRequest{
-		StationId:     a.cfg.StationID,
-		ClientVersion: Version,
-	})
-	if err != nil {
-		return "", fmt.Errorf("abrir sesión: %w", err)
-	}
-
-	a.mu.Lock()
-	a.sessionID = resp.SessionId
-	a.mu.Unlock()
-	if resp.Printer != nil {
-		a.log.Info("sesión abierta", "sesion", resp.SessionId,
-			"impresora", resp.Printer.Model, "serial", resp.Printer.Serial,
-			"rif", resp.Printer.FiscalRif,
-			"ultima_factura", resp.Printer.LastInvoiceNumber)
-	} else {
-		a.log.Info("sesión abierta", "sesion", resp.SessionId)
-	}
-	return resp.SessionId, nil
-}
-
-func (a *Agent) resetSession() {
-	a.mu.Lock()
-	a.sessionID = ""
-	a.mu.Unlock()
-}
-
-func (a *Agent) dropConnection() {
-	a.mu.Lock()
-	conn := a.conn
-	a.conn, a.client, a.sessionID = nil, nil, ""
-	a.mu.Unlock()
-	if conn != nil {
-		_ = conn.Close()
-	}
-}
-
-func (a *Agent) dialOptions() ([]grpc.DialOption, error) {
-	tlsCfg := a.cfg.Server.TLS
-	if !tlsCfg.Enabled {
-		return []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}, nil
-	}
-	cfg := &tls.Config{MinVersion: tls.VersionTLS12}
-	if tlsCfg.CAFile != "" {
-		pem, err := os.ReadFile(tlsCfg.CAFile)
+func decodeResponse(resp *commandResponse) ([]byte, error) {
+	if resp.ResponseBase64 != "" {
+		out, err := base64.StdEncoding.DecodeString(resp.ResponseBase64)
 		if err != nil {
-			return nil, fmt.Errorf("leer CA del spooler: %w", err)
+			return nil, fmt.Errorf("respuesta base64 inválida: %w", err)
 		}
-		pool := x509.NewCertPool()
-		if !pool.AppendCertsFromPEM(pem) {
-			return nil, fmt.Errorf("CA inválida: %s", tlsCfg.CAFile)
-		}
-		cfg.RootCAs = pool
+		return out, nil
 	}
-	if tlsCfg.CertFile != "" && tlsCfg.KeyFile != "" {
-		cert, err := tls.LoadX509KeyPair(tlsCfg.CertFile, tlsCfg.KeyFile)
-		if err != nil {
-			return nil, fmt.Errorf("cargar certificado del agente: %w", err)
-		}
-		cfg.Certificates = []tls.Certificate{cert}
+	return []byte(resp.Response), nil
+}
+
+func normalizeBase(addr string) string {
+	a := strings.TrimSpace(addr)
+	if a == "" {
+		return ""
 	}
-	return []grpc.DialOption{grpc.WithTransportCredentials(credentials.NewTLS(cfg))}, nil
+	if !strings.Contains(a, "://") {
+		a = "http://" + a
+	}
+	return strings.TrimRight(a, "/")
+}
+
+func retryableStatus(status int) bool {
+	switch status {
+	case http.StatusTooManyRequests, http.StatusBadGateway, http.StatusServiceUnavailable:
+		return true
+	}
+	return false
+}
+
+// errorMessage extrae el mensaje de un errorEnvelope; si no lo reconoce,
+// devuelve el código y una descripción genérica.
+func errorMessage(data []byte, status int) string {
+	var env struct {
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(data, &env); err == nil && env.Error.Message != "" {
+		if env.Error.Code != "" {
+			return fmt.Sprintf("HTTP %d (%s): %s", status, env.Error.Code, env.Error.Message)
+		}
+		return fmt.Sprintf("HTTP %d: %s", status, env.Error.Message)
+	}
+	if len(data) == 0 {
+		return fmt.Sprintf("HTTP %d", status)
+	}
+	return fmt.Sprintf("HTTP %d: %s", status, strings.TrimSpace(string(data)))
 }

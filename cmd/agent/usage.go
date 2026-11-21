@@ -31,7 +31,7 @@ const agentDocs = `Guía rápida — Agente de estación
 
 2. Edite configs\agent.yaml:
    - station_id: identificador único (por ejemplo CAJA-01)
-   - server.address: IP y puerto del spooler (por ejemplo 192.168.1.10:5050)
+   - server.address: URL del spooler (por ejemplo http://192.168.1.10:8080)
    - server.token: el mismo token del servidor
    - virtual_com.name: COM4
    - virtual_com: 9600 8N1, sin control de flujo

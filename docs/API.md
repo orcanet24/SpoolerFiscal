@@ -1,8 +1,8 @@
-# API REST del spooler fiscal
+# API HTTP del spooler fiscal
 
-La misma instancia que sirve gRPC a las estaciones de Profit Plus expone una API
-HTTP/JSON opcional para **ecommerce, ERP web, CRM o cualquier sistema** que
-necesite imprimir en la impresora fiscal compartida.
+El servidor expone una API HTTP/JSON que usan los agentes de estación (Profit
+Plus) y también **ecommerce, ERP web, CRM o cualquier sistema** que necesite
+imprimir en la impresora fiscal compartida.
 
 Contrato formal: [`api/openapi.yaml`](../api/openapi.yaml). Configuración:
 sección `http` de [`configs/server.yaml`](../configs/server.yaml).
@@ -11,14 +11,14 @@ Manual completo (instalación, operación y ejemplos en seis lenguajes):
 [`manual.html`](manual.html) — también servido en `http://servidor:8080/docs`.
 Ejemplos ejecutables: [`../examples/`](../examples/README.md).
 
-## ¿Por qué REST en el servidor y no un gateway aparte?
+## ¿Por qué HTTP en el servidor y no un gateway aparte?
 
-Un proceso intermedio (gateway REST → gRPC) obliga a desplegar, configurar y
-actualizar una segunda pieza, con su propio token y su propio ciclo de vida. Peor
-aún: si alguien arranca dos gateways, cada uno abre sus sesiones y el turno por
-factura se reparte entre dos colas.
+Un proceso intermedio (gateway HTTP) obliga a desplegar, configurar y actualizar
+una segunda pieza, con su propio token y su propio ciclo de vida. Peor aún: si
+alguien arranca dos gateways, cada uno abre sus sesiones y el turno por factura
+se reparte entre dos colas.
 
-La REST vive **dentro de `server.exe`** y usa el mismo `Spooler`:
+La API HTTP vive **dentro de `server.exe`** y usa el mismo `Spooler`:
 
 - una sola cola serializada y un solo correlativo;
 - el mismo turno exclusivo por factura que las estaciones COM;

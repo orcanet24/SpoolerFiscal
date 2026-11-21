@@ -43,21 +43,21 @@ cliente, pagos, descuentos u otros documentos.
 ## Cómo funciona
 
 ```text
-Profit Plus ── COM virtual ── agent.exe ── gRPC ──┐
+Profit Plus ── COM virtual ── agent.exe ── HTTP ──┐
                                                   ├── server.exe ── COM/serie ── TFHKA
-Ecommerce / ERP / app ───────── REST/JSON ────────┘
+Ecommerce / ERP / app ──────────── HTTP/JSON ──────┘
 ```
 
 - **`server.exe`** vive en el equipo que tiene conectada la impresora. Mantiene
   la cola serializada, el turno exclusivo de cada factura, el guardián de estado,
-  la base SQLite y la API REST opcional.
+  la base SQLite y la API HTTP.
 - **`agent.exe`** se instala en cada estación Profit Plus. Comunica el COM
-  virtual local con el servidor por gRPC; transporta las tramas sin interpretarlas.
+  virtual local con el servidor por HTTP; transporta las tramas sin interpretarlas.
 - **Impresora:** el único driver implementado es `tfhka` (The Factory HKA,
   protocolo ASCII). La conexión serie es para uso real; TCP se admite para
   laboratorio o un puente serie/red.
-- **API REST:** vive dentro de `server.exe`; REST y estaciones comparten la
-  misma impresora, cola, correlativo observado y auditoría.
+- **API HTTP:** vive dentro de `server.exe`; los agentes y los sistemas externos
+  comparten la misma impresora, cola, correlativo observado y auditoría.
 - **Persistencia:** SQLite en `data/spooler.db`. Los documentos no se purgan;
   la retención de la bitácora de comandos es configurable.
 
@@ -181,9 +181,8 @@ Gacetas de la Imprenta Nacional](https://www.gacetaoficial.gob.ve/gacetas/filtro
   adaptador USB-serie. Ajuste COM y parámetros según el modelo y firmware.
 - **Profit Plus:** puerto COM virtual por estación; la guía del proyecto utiliza
   com0com.
-- **Red:** el servidor debe aceptar gRPC desde los agentes (5050 por omisión).
-  Si se habilita REST, los clientes también necesitan acceso al puerto HTTP
-  configurado (8080 por omisión).
+- **Red:** el servidor expone una API HTTP (8080 por omisión) que usan los
+  agentes de estación y los sistemas externos.
 
 ## Instalación resumida
 
@@ -211,9 +210,9 @@ desplegar en producción. El flujo básico es:
 6. Instale y opere los servicios con los scripts documentados en
    [instalación](docs/INSTALACION.md) y [operación](docs/OPERACION.md).
 
-El servidor trae habilitada la API REST en `configs/server.yaml`; verifique el
-valor `http.enabled` y el token antes de iniciar. Cambie las credenciales de
-ejemplo. **No exponga la API a Internet.**
+El servidor expone la API HTTP en `configs/server.yaml`; verifique `http.listen`
+y el token antes de iniciar. Cambie las credenciales de ejemplo. **No exponga la
+API a Internet.**
 
 ## Integración rápida con `curl`
 
@@ -410,9 +409,11 @@ protocolo en [TFHKA](docs/PROTOCOLO_TFHKA.md).
 
 ## Ejemplos y documentación
 
-- [API REST: referencia y ejemplos adicionales](docs/API.md)
+- [API HTTP: referencia y ejemplos adicionales](docs/API.md)
 - [Manual HTML completo](docs/manual.html) — también se sirve en
   `/docs` cuando la API está activa
+- [Manual paso a paso (servidor y cliente)](docs/manual_paso_a_paso.html) — guía
+  visual de instalación y operación, con las dos partes separadas
 - [Diccionario del código](docs/diccionario/index.html): árbol de archivos,
   funciones, tipos y llamadas entre funciones. Se regenera con
   `go run ./cmd/diccionario` y se sirve en `/docs/diccionario`

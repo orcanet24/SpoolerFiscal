@@ -42,16 +42,15 @@ type TLS struct {
 	KeyFile  string `yaml:"key_file"`
 }
 
-// ServerEndpoint es la conexión del agente hacia el spooler.
+// ServerEndpoint es la conexión del agente hacia la API del spooler.
 type ServerEndpoint struct {
 	Address          string `yaml:"address"`
 	Token            string `yaml:"token"`
 	TLS              TLS    `yaml:"tls"`
-	DialTimeoutMS    int    `yaml:"dial_timeout_ms"`
 	RequestTimeoutMS int    `yaml:"request_timeout_ms"`
 }
 
-// Bridge controla el puente de bytes entre el COM virtual y gRPC.
+// Bridge controla el puente de bytes entre el COM virtual y la API HTTP.
 type Bridge struct {
 	ReadGapMS           int    `yaml:"read_gap_ms"`
 	ResponseTimeoutMS   int    `yaml:"response_timeout_ms"`
@@ -133,9 +132,9 @@ type Metrics struct {
 	IntervalSeconds int `yaml:"interval_seconds"`
 }
 
-// HTTP es la API REST opcional para sistemas externos (ecommerce, ERP, CRM).
+// HTTP es la API del spooler: la usan los agentes de estación y los sistemas
+// externos (ecommerce, ERP, CRM). Es el único transporte de entrada.
 type HTTP struct {
-	Enabled               bool   `yaml:"enabled"`
 	Listen                string `yaml:"listen"`
 	MaxBodyBytes          int64  `yaml:"max_body_bytes"`
 	ReadTimeoutMS         int    `yaml:"read_timeout_ms"`
@@ -148,11 +147,9 @@ type HTTP struct {
 
 // Server es la configuración completa del servicio central.
 type Server struct {
-	Listen          string     `yaml:"listen"`
 	Token           string     `yaml:"token"`
 	TLS             TLS        `yaml:"tls"`
 	AllowedStations []string   `yaml:"allowed_stations"`
-	SessionTTLMin   int        `yaml:"session_ttl_minutes"`
 	Printer         PrinterCfg `yaml:"printer"`
 	Queue           Queue      `yaml:"queue"`
 	Guard           Guard      `yaml:"guard"`
@@ -176,8 +173,7 @@ func DefaultAgent() Agent {
 	return Agent{
 		StationID: "",
 		Server: ServerEndpoint{
-			Address:          "127.0.0.1:5050",
-			DialTimeoutMS:    3000,
+			Address:          "http://127.0.0.1:8080",
 			RequestTimeoutMS: 30000,
 		},
 		VirtualCOM: Port{
@@ -199,8 +195,6 @@ func DefaultAgent() Agent {
 // DefaultServer devuelve la configuración base del servidor.
 func DefaultServer() Server {
 	return Server{
-		Listen:          "0.0.0.0:5050",
-		SessionTTLMin:   120,
 		AllowedStations: nil,
 		Printer: PrinterCfg{
 			Driver: "tfhka", Transport: "serial",
@@ -224,7 +218,7 @@ func DefaultServer() Server {
 		Logging:  defaultsLogging("logs/server.log"),
 		Metrics:  Metrics{IntervalSeconds: 60},
 		HTTP: HTTP{
-			Enabled: false, Listen: "0.0.0.0:8080", MaxBodyBytes: 256 * 1024,
+			Listen: "0.0.0.0:8080", MaxBodyBytes: 256 * 1024,
 			ReadTimeoutMS: 15000, WriteTimeoutMS: 60000, IdempotencyRetentionD: 30,
 			JobResumeIntervalSeconds: 10,
 		},
@@ -265,9 +259,6 @@ func LoadServer(path string) (Server, error) {
 	cfg.ConfigPath = path
 	if v := os.Getenv("SPOOLER_TOKEN"); v != "" {
 		cfg.Token = v
-	}
-	if v := os.Getenv("SPOOLER_LISTEN"); v != "" {
-		cfg.Listen = v
 	}
 	if v := os.Getenv("SPOOLER_PRINTER_PORT"); v != "" && cfg.Printer.Transport == "serial" {
 		cfg.Printer.Port.Name = v
@@ -327,9 +318,6 @@ func (a Agent) Validate() error {
 // Validate revisa la configuración del servidor.
 func (s Server) Validate() error {
 	var errs []string
-	if strings.TrimSpace(s.Listen) == "" {
-		errs = append(errs, "listen es obligatorio (ej. 0.0.0.0:5050)")
-	}
 	if strings.TrimSpace(s.Token) == "" {
 		errs = append(errs, "token es obligatorio (token compartido); puede venir de SPOOLER_TOKEN")
 	}
@@ -361,16 +349,14 @@ func (s Server) Validate() error {
 	default:
 		errs = append(errs, fmt.Sprintf("printer.transport %q no soportado (serial|tcp)", s.Printer.Transport))
 	}
-	if s.HTTP.Enabled {
-		if strings.TrimSpace(s.HTTP.Listen) == "" {
-			errs = append(errs, "http.listen es obligatorio con http.enabled=true")
-		}
-		if s.HTTP.MaxBodyBytes <= 0 {
-			errs = append(errs, "http.max_body_bytes debe ser > 0")
-		}
-		if s.HTTP.ReadTimeoutMS <= 0 || s.HTTP.WriteTimeoutMS <= 0 {
-			errs = append(errs, "http.read_timeout_ms y http.write_timeout_ms deben ser > 0")
-		}
+	if strings.TrimSpace(s.HTTP.Listen) == "" {
+		errs = append(errs, "http.listen es obligatorio (ej. 0.0.0.0:8080)")
+	}
+	if s.HTTP.MaxBodyBytes <= 0 {
+		errs = append(errs, "http.max_body_bytes debe ser > 0")
+	}
+	if s.HTTP.ReadTimeoutMS <= 0 || s.HTTP.WriteTimeoutMS <= 0 {
+		errs = append(errs, "http.read_timeout_ms y http.write_timeout_ms deben ser > 0")
 	}
 	if s.Queue.MaxPending <= 0 {
 		errs = append(errs, "queue.max_pending debe ser > 0")

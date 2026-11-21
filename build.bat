@@ -29,7 +29,7 @@ if not exist "%CLIENTE%\.env" (
     >"%CLIENTE%\.env" echo # Ajuste estos valores para esta estacion.
     >>"%CLIENTE%\.env" echo SPOOLER_TOKEN=CAMBIAR-ESTE-TOKEN
     >>"%CLIENTE%\.env" echo SPOOLER_STATION_ID=CAJA-01
-    >>"%CLIENTE%\.env" echo SPOOLER_SERVER_ADDR=192.168.1.10:5050
+    >>"%CLIENTE%\.env" echo SPOOLER_SERVER_ADDR=http://192.168.1.10:8080
     >>"%CLIENTE%\.env" echo SPOOLER_VIRTUAL_COM=COM4
 )
 if errorlevel 1 goto :error
@@ -37,7 +37,6 @@ if errorlevel 1 goto :error
 if not exist "%SERVER%\.env" (
     >"%SERVER%\.env" echo # Ajuste estos valores para el servidor fiscal.
     >>"%SERVER%\.env" echo SPOOLER_TOKEN=CAMBIAR-ESTE-TOKEN
-    >>"%SERVER%\.env" echo SPOOLER_LISTEN=0.0.0.0:5050
     >>"%SERVER%\.env" echo SPOOLER_PRINTER_PORT=COM1
 )
 if errorlevel 1 goto :error

@@ -3,23 +3,17 @@ package server
 import (
 	"context"
 	"crypto/tls"
-	"crypto/x509"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
-	"os"
 	"sync"
 	"time"
-
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials"
 
 	"spoolerfiscal/internal/config"
 	"spoolerfiscal/internal/fiscal"
 	"spoolerfiscal/internal/frame"
-	pb "spoolerfiscal/proto/spooler/v1"
 )
 
 // Runtime agrupa las piezas del servidor ya cableadas.
@@ -28,16 +22,13 @@ type Runtime struct {
 	log     *slog.Logger
 	store   *Store
 	spooler *Spooler
-	service *Service
-	grpc    *grpc.Server
-	lis     net.Listener
 	httpAPI *HTTPAPI
 	httpSrv *http.Server
 	httpLis net.Listener
 	once    sync.Once
 }
 
-// NewRuntime abre la base, construye la impresora y prepara el listener gRPC.
+// NewRuntime abre la base, construye la impresora y prepara la API HTTP.
 func NewRuntime(cfg config.Server, log *slog.Logger) (*Runtime, error) {
 	store, err := OpenStore(cfg.Database.Path)
 	if err != nil {
@@ -69,85 +60,46 @@ func NewRuntime(cfg config.Server, log *slog.Logger) (*Runtime, error) {
 		},
 	}, log)
 
-	service := NewService(ServiceConfig{
-		Token:           cfg.Token,
-		AllowedStations: cfg.AllowedStations,
-		Version:         Version,
-		Driver:          printer.Driver(),
-		SessionTTL:      time.Duration(cfg.SessionTTLMin) * time.Minute,
-		MaxCommandBytes: 64 * 1024,
+	httpAPI := NewHTTPAPI(HTTPConfig{
+		Token:             cfg.Token,
+		AllowedStations:   cfg.AllowedStations,
+		Version:           Version,
+		Driver:            printer.Driver(),
+		MaxBodyBytes:      cfg.HTTP.MaxBodyBytes,
+		MaxLines:          500,
+		MaxLineBytes:      1024,
+		DefaultTimeout:    ms(cfg.Queue.DefaultTimeoutMS),
+		MaxTimeout:        ms(cfg.Queue.MaxTimeoutMS),
+		ProbeTimeout:      ms(cfg.Queue.ProbeTimeoutMS),
+		JobResumeInterval: time.Duration(cfg.HTTP.JobResumeIntervalSeconds) * time.Second,
 	}, spooler, store, log)
 
-	opts := []grpc.ServerOption{
-		grpc.UnaryInterceptor(AuthUnaryInterceptor(cfg.Token)),
-		grpc.MaxRecvMsgSize(4 * 1024 * 1024),
-		grpc.MaxSendMsgSize(4 * 1024 * 1024),
+	httpLis, err := net.Listen("tcp", cfg.HTTP.Listen)
+	if err != nil {
+		_ = store.Close()
+		return nil, fmt.Errorf("escuchar API en %s: %w", cfg.HTTP.Listen, err)
+	}
+	httpSrv := &http.Server{
+		Handler:           httpAPI.Handler(),
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       ms(cfg.HTTP.ReadTimeoutMS),
+		WriteTimeout:      ms(cfg.HTTP.WriteTimeoutMS),
+		IdleTimeout:       60 * time.Second,
+		MaxHeaderBytes:    1 << 16,
 	}
 	if cfg.TLS.Enabled {
-		creds, err := serverCredentials(cfg.TLS)
+		tlsCfg, err := httpTLSConfig(cfg.TLS)
 		if err != nil {
+			_ = httpLis.Close()
 			_ = store.Close()
 			return nil, err
 		}
-		opts = append(opts, grpc.Creds(creds))
-	}
-
-	lis, err := net.Listen("tcp", cfg.Listen)
-	if err != nil {
-		_ = store.Close()
-		return nil, fmt.Errorf("escuchar en %s: %w", cfg.Listen, err)
-	}
-
-	srv := grpc.NewServer(opts...)
-	pb.RegisterFiscalSpoolerServer(srv, service)
-
-	var httpAPI *HTTPAPI
-	var httpSrv *http.Server
-	var httpLis net.Listener
-	if cfg.HTTP.Enabled {
-		httpAPI = NewHTTPAPI(HTTPConfig{
-			Token:             cfg.Token,
-			AllowedStations:   cfg.AllowedStations,
-			Version:           Version,
-			Driver:            printer.Driver(),
-			MaxBodyBytes:      cfg.HTTP.MaxBodyBytes,
-			MaxLines:          500,
-			MaxLineBytes:      1024,
-			DefaultTimeout:    ms(cfg.Queue.DefaultTimeoutMS),
-			MaxTimeout:        ms(cfg.Queue.MaxTimeoutMS),
-			ProbeTimeout:      ms(cfg.Queue.ProbeTimeoutMS),
-			JobResumeInterval: time.Duration(cfg.HTTP.JobResumeIntervalSeconds) * time.Second,
-		}, spooler, store, log)
-		httpLis, err = net.Listen("tcp", cfg.HTTP.Listen)
-		if err != nil {
-			_ = lis.Close()
-			_ = store.Close()
-			return nil, fmt.Errorf("escuchar API REST en %s: %w", cfg.HTTP.Listen, err)
-		}
-		httpSrv = &http.Server{
-			Handler:           httpAPI.Handler(),
-			ReadHeaderTimeout: 10 * time.Second,
-			ReadTimeout:       ms(cfg.HTTP.ReadTimeoutMS),
-			WriteTimeout:      ms(cfg.HTTP.WriteTimeoutMS),
-			IdleTimeout:       60 * time.Second,
-			MaxHeaderBytes:    1 << 16,
-		}
-		if cfg.TLS.Enabled {
-			tlsCfg, err := httpTLSConfig(cfg.TLS)
-			if err != nil {
-				_ = httpLis.Close()
-				_ = lis.Close()
-				_ = store.Close()
-				return nil, err
-			}
-			// La REST autentica con token; no exige certificado de cliente.
-			httpSrv.TLSConfig = tlsCfg
-		}
+		// La API autentica con token; no exige certificado de cliente.
+		httpSrv.TLSConfig = tlsCfg
 	}
 
 	return &Runtime{
 		cfg: cfg, log: log, store: store, spooler: spooler,
-		service: service, grpc: srv, lis: lis,
 		httpAPI: httpAPI, httpSrv: httpSrv, httpLis: httpLis,
 	}, nil
 }
@@ -155,18 +107,10 @@ func NewRuntime(cfg config.Server, log *slog.Logger) (*Runtime, error) {
 // Version es la versión del binario servidor.
 const Version = "1.0.0"
 
-// Addr devuelve la dirección real de escucha gRPC (útil con puerto 0).
-func (r *Runtime) Addr() string { return r.lis.Addr().String() }
+// Addr devuelve la dirección real de la API (útil con puerto 0).
+func (r *Runtime) Addr() string { return r.httpLis.Addr().String() }
 
-// HTTPAddr devuelve la dirección real de la API REST, o "" si está apagada.
-func (r *Runtime) HTTPAddr() string {
-	if r.httpLis == nil {
-		return ""
-	}
-	return r.httpLis.Addr().String()
-}
-
-// Run arranca la cola y sirve gRPC hasta que el contexto se cancele.
+// Run arranca la cola y sirve la API hasta que el contexto se cancele.
 func (r *Runtime) Run(ctx context.Context) error {
 	if err := r.spooler.Start(ctx); err != nil {
 		return err
@@ -203,16 +147,13 @@ func (r *Runtime) Run(ctx context.Context) error {
 		}
 	}
 
-	go r.sweepLoop(ctx)
 	go r.metricsLoop(ctx)
 	if r.cfg.Queue.StatusProbeIntervalSeconds > 0 {
 		go r.probeLoop(ctx)
 	}
-	if r.httpAPI != nil {
-		go r.httpAPI.Dispatcher(ctx)
-	}
+	go r.httpAPI.Dispatcher(ctx)
 
-	if r.cfg.HTTP.Enabled && r.cfg.HTTP.IdempotencyRetentionD > 0 {
+	if r.cfg.HTTP.IdempotencyRetentionD > 0 {
 		cut := time.Now().AddDate(0, 0, -r.cfg.HTTP.IdempotencyRetentionD)
 		if n, err := r.store.PruneIdempotency(cut); err != nil {
 			r.log.Warn("purgar claves de idempotencia", "error", err)
@@ -221,30 +162,26 @@ func (r *Runtime) Run(ctx context.Context) error {
 		}
 	}
 
-	errCh := make(chan error, 2)
-	go func() { errCh <- r.grpc.Serve(r.lis) }()
-	if r.httpSrv != nil {
-		go func() {
-			var err error
-			if r.httpSrv.TLSConfig != nil {
-				err = r.httpSrv.ServeTLS(r.httpLis, "", "")
-			} else {
-				err = r.httpSrv.Serve(r.httpLis)
-			}
-			if err != nil && !errors.Is(err, http.ErrServerClosed) {
-				errCh <- err
-			}
-		}()
-	}
+	errCh := make(chan error, 1)
+	go func() {
+		var err error
+		if r.httpSrv.TLSConfig != nil {
+			err = r.httpSrv.ServeTLS(r.httpLis, "", "")
+		} else {
+			err = r.httpSrv.Serve(r.httpLis)
+		}
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			errCh <- err
+		}
+	}()
 
 	snap := r.spooler.Snapshot()
-	r.log.Info("spooler fiscal escuchando", "addr", r.lis.Addr().String(),
+	r.log.Info("spooler fiscal escuchando", "addr", r.httpLis.Addr().String(),
 		"tls", r.cfg.TLS.Enabled, "driver", r.cfg.Printer.Driver,
 		"historico_documentos", snap.History.Count,
 		"ultima_factura", snap.History.LastNumbers[fiscal.DocInvoice])
-	if r.httpSrv != nil {
-		r.log.Info("api REST escuchando", "addr", r.httpLis.Addr().String(), "tls", r.cfg.TLS.Enabled, "docs", "/docs/API.md")
-	}
+	r.log.Info("api HTTP escuchando", "addr", r.httpLis.Addr().String(),
+		"docs", "/docs/API.md")
 
 	select {
 	case err := <-errCh:
@@ -253,24 +190,11 @@ func (r *Runtime) Run(ctx context.Context) error {
 	}
 
 	r.log.Info("deteniendo spooler fiscal")
-	if r.httpSrv != nil {
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		if err := r.httpSrv.Shutdown(shutdownCtx); err != nil {
-			r.log.Warn("cierre de la API REST", "error", err)
-		}
-		cancel()
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	if err := r.httpSrv.Shutdown(shutdownCtx); err != nil {
+		r.log.Warn("cierre de la API", "error", err)
 	}
-	done := make(chan struct{})
-	go func() {
-		r.grpc.GracefulStop()
-		close(done)
-	}()
-	select {
-	case <-done:
-	case <-time.After(10 * time.Second):
-		r.log.Warn("cierre forzado de gRPC")
-		r.grpc.Stop()
-	}
+	cancel()
 	r.spooler.Stop()
 	return nil
 }
@@ -285,30 +209,10 @@ func (r *Runtime) Close() error {
 		if r.httpLis != nil {
 			_ = r.httpLis.Close()
 		}
-		if r.lis != nil {
-			_ = r.lis.Close()
-		}
 		r.spooler.Stop()
 		err = r.store.Close()
 	})
 	return err
-}
-
-func (r *Runtime) sweepLoop(ctx context.Context) {
-	ttl := time.Duration(r.cfg.SessionTTLMin) * time.Minute
-	if ttl <= 0 {
-		ttl = 2 * time.Hour
-	}
-	ticker := time.NewTicker(time.Minute)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			r.service.Sweep(ttl)
-		}
-	}
 }
 
 // probeLoop mantiene el estado del guardián fresco: consulta la impresora
@@ -415,31 +319,10 @@ func buildPrinter(cfg config.Server, log *slog.Logger) (fiscal.Printer, error) {
 	return printer, nil
 }
 
-func serverCredentials(cfg config.TLS) (credentials.TransportCredentials, error) {
-	cert, err := tls.LoadX509KeyPair(cfg.CertFile, cfg.KeyFile)
-	if err != nil {
-		return nil, fmt.Errorf("cargar certificado del servidor: %w", err)
-	}
-	tc := &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12}
-	if cfg.CAFile != "" {
-		pem, err := os.ReadFile(cfg.CAFile)
-		if err != nil {
-			return nil, fmt.Errorf("leer CA de clientes: %w", err)
-		}
-		pool := x509.NewCertPool()
-		if !pool.AppendCertsFromPEM(pem) {
-			return nil, fmt.Errorf("CA de clientes inválida: %s", cfg.CAFile)
-		}
-		tc.ClientCAs = pool
-		tc.ClientAuth = tls.RequireAndVerifyClientCert
-	}
-	return credentials.NewTLS(tc), nil
-}
-
 func httpTLSConfig(cfg config.TLS) (*tls.Config, error) {
 	cert, err := tls.LoadX509KeyPair(cfg.CertFile, cfg.KeyFile)
 	if err != nil {
-		return nil, fmt.Errorf("cargar certificado para la API REST: %w", err)
+		return nil, fmt.Errorf("cargar certificado para la API: %w", err)
 	}
 	return &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12}, nil
 }
