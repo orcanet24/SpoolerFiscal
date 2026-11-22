@@ -3,10 +3,19 @@
 Arquitectura: **una PC servidor** con la impresora fiscal conectada y **una PC por
 estación** con Profit Plus. Todas en la misma red.
 
+## Instalación rápida (recomendada)
+
+Doble clic en `build.bat` y luego en **`INSTALAR.bat`**: el asistente instala el
+servicio de Windows (inicio automático), genera la configuración, restringe
+permisos y comprueba que arranca. Guía: [INSTALAR.md](INSTALAR.md).
+
+El resto de este manual describe la instalación manual paso a paso; es útil para
+entender qué hace el instalador o para casos especiales.
+
 ## 0. Requisitos
 
 - Windows 10/11 o Server 2019/2022, x64.
-- Go 1.24 o superior **sólo en la máquina de compilación** (los ejecutables no lo
+- Go 1.26 o superior **sólo en la máquina de compilación** (los ejecutables no lo
   necesitan).
 - Puerto serie físico para la impresora (o adaptador USB-serie).
 - Firewall: el puerto HTTP del servidor (8080 por omisión) accesible desde las
@@ -34,6 +43,8 @@ go build -o bin\agent.exe   .\cmd\agent
 2. Edite `configs\server.yaml`:
    - `http.listen`: `0.0.0.0:8080` (único puerto; lo usan agentes y sistemas externos).
    - `token`: un secreto largo y único (o use la variable `SPOOLER_TOKEN`).
+   - `station_tokens`: opcional, un token por estación. Una estación con token
+     propio ya no se representa con el compartido y no puede emitir como otra.
    - `printer.port.name`: el COM real de la impresora (ej. `COM1`).
    - `printer.port.baud_rate`: 9600 o 115200 según la impresora.
    - `allowed_stations`: opcional, lista de estaciones autorizadas.
@@ -63,9 +74,10 @@ go build -o bin\agent.exe   .\cmd\agent
    New-NetFirewallRule -DisplayName "Spooler Fiscal HTTP" -Direction Inbound -Protocol TCP -LocalPort 8080 -Action Allow
    ```
 
-   La REST comparte el token de las estaciones. Si cruza una red no confiable,
-   active `tls.enabled` (sirve HTTPS con el mismo certificado) y no la exponga a
-   Internet.
+   La REST comparte el token (o usa `station_tokens`). Si cruza una red no
+   confiable, active `tls.enabled` (HTTPS). Con `tls.ca_file` el servidor exige
+   certificado de cliente (mTLS): el agente configura `cert_file`/`key_file`.
+   No exponga la API a Internet.
 
 ## 3. Estación (PC con Profit Plus)
 
@@ -122,9 +134,22 @@ The Factory**, puerto **COM3**, 9600 8N1, sin control de flujo.
 
 ## 4. Verificación de extremo a extremo
 
+0. **Puesta en marcha contra la impresora física.** Antes de operar, ejecute el
+   diagnóstico (detenga el servicio para liberar el puerto):
+
+   ```powershell
+   sc stop SpoolerFiscalServer
+   .\bin\verificar\verificar.exe -config .\configs\server.yaml -out .\data\verificacion-inicial.json
+   ```
+
+   Debe dar `Resultado: OK` y mostrar el serial y el RIF reales de la máquina.
+   El procedimiento completo (papel agotado, reporte X, primera venta) está en
+   [`PUESTA_EN_MARCHA.md`](PUESTA_EN_MARCHA.md).
+
 1. En el servidor, revise `logs\server.log`: debe aparecer `sesión abierta` con el
    `station_id` al abrir Profit Plus.
-2. Emita una factura de prueba desde Profit Plus.
+2. Emita la primera **venta real** desde Profit Plus (no una factura de prueba:
+   cada factura fiscal consume un correlativo y es un documento real).
 3. En el servidor debe aparecer `documento fiscal registrado` con tipo, número y
    estación; en la estación, `documentos registrados` por el spooler.
 4. En la base: `data\spooler.db`, tabla `documents`.

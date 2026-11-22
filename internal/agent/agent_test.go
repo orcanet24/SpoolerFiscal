@@ -2,17 +2,21 @@ package agent
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"spoolerfiscal/internal/config"
+	"spoolerfiscal/internal/testutil"
 )
 
 func testLogger() *slog.Logger {
@@ -47,8 +51,8 @@ func TestForwardPostsRawCommand(t *testing.T) {
 		raw, _ := io.ReadAll(r.Body)
 		gotBody = string(raw)
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"station":        "CAJA-01",
-			"session":        "api:CAJA-01",
+			"station":         "CAJA-01",
+			"session":         "api:CAJA-01",
 			"response_base64": base64.StdEncoding.EncodeToString([]byte("0|OK\r\n")),
 		})
 	}))
@@ -135,5 +139,67 @@ func TestForwardUsesTimeout(t *testing.T) {
 	defer cancel()
 	if _, err := ag.Forward(ctx, []byte("S1\r\n")); err == nil {
 		t.Fatal("se esperaba timeout")
+	}
+}
+
+// El agente presenta su certificado de cliente contra un servidor mTLS; sin
+// certificado, el handshake falla.
+func TestAgentMTLSClientCertificate(t *testing.T) {
+	bundle, err := testutil.WriteCertificates(t.TempDir())
+	if err != nil {
+		t.Fatalf("WriteCertificates: %v", err)
+	}
+	serverCert, err := tls.LoadX509KeyPair(bundle.ServerCert, bundle.ServerKey)
+	if err != nil {
+		t.Fatalf("certificado del servidor: %v", err)
+	}
+	caPEM, err := os.ReadFile(bundle.CAFile)
+	if err != nil {
+		t.Fatalf("leer CA: %v", err)
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(caPEM) {
+		t.Fatal("CA inválida")
+	}
+
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	srv.TLS = &tls.Config{
+		Certificates: []tls.Certificate{serverCert},
+		ClientCAs:    pool,
+		ClientAuth:   tls.RequireAndVerifyClientCert,
+		MinVersion:   tls.VersionTLS12,
+	}
+	srv.StartTLS()
+	defer srv.Close()
+
+	newAgent := func(tlsCfg config.TLS) *Agent {
+		cfg := config.DefaultAgent()
+		cfg.StationID = "CAJA-01"
+		cfg.Server.Address = srv.URL
+		cfg.Server.Token = "token"
+		cfg.Server.RequestTimeoutMS = 3000
+		cfg.Server.TLS = tlsCfg
+		ag := New(cfg, testLogger())
+		ctx, cancel := context.WithCancel(context.Background())
+		if err := ag.Start(ctx); err != nil {
+			t.Fatalf("Start: %v", err)
+		}
+		t.Cleanup(func() { cancel(); ag.Close() })
+		return ag
+	}
+
+	withCert := newAgent(config.TLS{
+		Enabled: true, CAFile: bundle.CAFile,
+		CertFile: bundle.ClientCert, KeyFile: bundle.ClientKey,
+	})
+	if !withCert.health() {
+		t.Fatal("el agente con certificado de cliente no conectó")
+	}
+
+	withoutCert := newAgent(config.TLS{Enabled: true, CAFile: bundle.CAFile})
+	if withoutCert.health() {
+		t.Fatal("un agente sin certificado no debía conectar a un servidor mTLS")
 	}
 }

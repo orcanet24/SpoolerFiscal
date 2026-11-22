@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"time"
 
 	"golang.org/x/sys/windows/svc"
@@ -63,11 +64,25 @@ func (h *handler) Execute(args []string, r <-chan svc.ChangeRequest, changes cha
 }
 
 func runService(app App, configPath string) error {
+	prepareServiceCWD()
 	return svc.Run(app.Name, &handler{app: app, configPath: configPath})
 }
 
 func runDebug(app App, configPath string) error {
+	prepareServiceCWD()
 	return debug.Run(app.Name, &handler{app: app, configPath: configPath})
+}
+
+// prepareServiceCWD fija el directorio de trabajo en el del ejecutable. El
+// Administrador de servicios de Windows arranca los procesos con CWD en
+// System32: sin esto, las rutas relativas de la configuración (data\spooler.db,
+// logs\server.log) acabarían dentro de C:\Windows\System32.
+func prepareServiceCWD() {
+	exe, err := os.Executable()
+	if err != nil {
+		return
+	}
+	_ = os.Chdir(filepath.Dir(exe))
 }
 
 func installService(app App, configPath string) error {

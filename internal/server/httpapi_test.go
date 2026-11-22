@@ -382,6 +382,76 @@ func TestHTTPStructuredInvoiceRejectsBadTotalsAndInjection(t *testing.T) {
 	}
 }
 
+func TestHTTPStructuredInvoiceFullSale(t *testing.T) {
+	srv, fp, _, _ := testAPI(t, HTTPConfig{})
+	payload := map[string]any{
+		"station": "ECOM-01",
+		"customer": map[string]any{
+			"rif": "J-12345678-9", "name": "CLIENTE C.A.",
+			"address": "Av. 1", "phone": "0212-1234567",
+		},
+		"items": []map[string]any{
+			{"description": "CAFE", "quantity": 1, "unit_price": 10.00, "tax": "general"},
+		},
+		"discount": 1.00,
+		"payments": []map[string]any{
+			{"method": "tarjeta", "amount": 9.00},
+		},
+		"totals": map[string]any{"total": 9.00},
+	}
+	resp, body := httpDo(t, srv, http.MethodPost, "/v1/invoices/structured", "tok-rest", mustJSON(t, payload), nil)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("estado = %d (%s)", resp.StatusCode, body)
+	}
+	var out structuredInvoiceResponse
+	if err := json.Unmarshal(body, &out); err != nil {
+		t.Fatalf("JSON: %v", err)
+	}
+	want := []string{
+		"iR*J-12345678-9",
+		"iS*CLIENTE C.A.",
+		"i01Av. 1",
+		"i02" + "0212-1234567",
+		"!   1.000     10.00CAFE",
+		"3",
+		"7001.00",
+		"103tarjeta",
+		"1009.00",
+		"101",
+	}
+	if len(out.CompiledLines) != len(want) {
+		t.Fatalf("líneas = %q", out.CompiledLines)
+	}
+	for i := range want {
+		if out.CompiledLines[i] != want[i] {
+			t.Fatalf("línea %d = %q, se esperaba %q", i, out.CompiledLines[i], want[i])
+		}
+	}
+	if out.Totals.Total != 9.00 || out.Totals.Discount != 1.00 {
+		t.Fatalf("totales = %+v", out.Totals)
+	}
+	if !out.Completed || out.InvoiceNumber != 1 {
+		t.Fatalf("factura = %+v", out)
+	}
+	if got := fp.commandCount(); got != len(want) {
+		t.Fatalf("comandos = %d, se esperaban %d", got, len(want))
+	}
+}
+
+// El orden canónico de TFHKA manda los datos del cliente antes de los ítems:
+// la API debe aceptarlos y el turno se toma desde la primera línea.
+func TestHTTPInvoiceAcceptsCustomerLinesFirst(t *testing.T) {
+	srv, _, _, _ := testAPI(t, HTTPConfig{})
+	payload := mustJSON(t, map[string]any{
+		"station": "ECOM-01",
+		"lines":   []string{"iR*J-12345678-9", "iS*CLIENTE C.A.", "!   1.000     10.00CAFE", "101"},
+	})
+	resp, body := httpDo(t, srv, http.MethodPost, "/v1/invoices", "tok-rest", payload, nil)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("estado = %d (%s)", resp.StatusCode, body)
+	}
+}
+
 func TestHTTPOrderRefKeepsOriginalClientRef(t *testing.T) {
 	srv, _, _, _ := testAPI(t, HTTPConfig{})
 

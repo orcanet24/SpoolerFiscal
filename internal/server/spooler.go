@@ -55,8 +55,9 @@ type SpoolerConfig struct {
 	// antes de que el planificador inserte una conciliación previa a abrir una
 	// factura. 0 = 10 segundos.
 	CorrelativeMaxAge time.Duration
-	// AutoCloseOpenDocument permite al spooler enviar 101 de recuperación cuando
-	// la impresora reporta un documento abierto que ninguna sesión reclama.
+	// AutoCloseOpenDocument permite al spooler enviar el cierre de recuperación
+	// del driver (101 en TFHKA, @Close en IxBatch) cuando la impresora reporta
+	// un documento abierto que ninguna sesión reclama.
 	AutoCloseOpenDocument bool
 	Guard                 GuardConfig
 	LogCommands           bool
@@ -74,7 +75,7 @@ type SubmitRequest struct {
 	ClientRef string
 	Timeout   time.Duration
 	// BypassGuard omite el guardián de estado. Sólo para comandos internos de
-	// recuperación (el 101 que cierra un documento abandonado): sin él, el
+	// recuperación (el cierre del documento abandonado): sin él, el guardián
 	// guardián bloquearía la cura del propio impedimento.
 	BypassGuard bool
 }
@@ -919,8 +920,9 @@ func (s *Spooler) reconcileDocumentCorrelative(ctx context.Context, docType stri
 
 // RecoverOpenDocument consulta el estado físico; si hay un documento fiscal
 // abierto que ninguna sesión viva del spooler reclama (factura colgada),
-// envía el cierre 101 de recuperación. owner es la sesión que reclama el
-// turno como legítimo dueño (vacío = nadie); si el dueño vive, no interviene.
+// envía el cierre de recuperación del driver (101 en TFHKA, @Close en IxBatch).
+// owner es la sesión que reclama el turno como legítimo dueño (vacío = nadie);
+// si el dueño vive, no interviene.
 func (s *Spooler) RecoverOpenDocument(ctx context.Context, owner string) (bool, error) {
 	if !s.cfg.AutoCloseOpenDocument {
 		return false, nil
@@ -941,9 +943,10 @@ func (s *Spooler) RecoverOpenDocument(ctx context.Context, owner string) (bool, 
 	if docOpen && docOwner != owner {
 		return false, nil
 	}
-	s.log.Warn("documento fiscal abierto sin dueño: se envía cierre de recuperación (101)",
-		"status", st.StatusText, "raw", st.Raw)
-	// El 101 pertenece al documento de la sesión colgada: se envía con su
+	closeCmd := s.closeDocumentCommand()
+	s.log.Warn("documento fiscal abierto sin dueño: se envía cierre de recuperación",
+		"comando", string(closeCmd), "status", st.StatusText, "raw", st.Raw)
+	// El cierre pertenece al documento de la sesión colgada: se envía con su
 	// identidad para que el planificador lo atienda dentro de su propio turno
 	// (y para que la auditoría registre quién cerró la factura).
 	session, station := "recuperacion", "recuperacion"
@@ -951,7 +954,7 @@ func (s *Spooler) RecoverOpenDocument(ctx context.Context, owner string) (bool, 
 		session, station = owner, owner
 	}
 	if _, err := s.Submit(ctx, SubmitRequest{
-		Command:     []byte("101"),
+		Command:     closeCmd,
 		Station:     station,
 		Session:     session,
 		Timeout:     s.cfg.DefaultTimeout,
@@ -960,6 +963,17 @@ func (s *Spooler) RecoverOpenDocument(ctx context.Context, owner string) (bool, 
 		return false, fmt.Errorf("cierre de recuperación: %w", err)
 	}
 	return true, nil
+}
+
+// closeDocumentCommand devuelve el comando de cierre de recuperación del driver
+// activo; 101 (TFHKA) si el driver no declara uno propio.
+func (s *Spooler) closeDocumentCommand() []byte {
+	if c, ok := s.printer.(fiscal.DocumentCloser); ok {
+		if cmd := c.CloseDocumentCommand(); len(cmd) > 0 {
+			return cmd
+		}
+	}
+	return []byte("101")
 }
 
 // advanceDocument mantiene el turno de la estación que tiene una factura
@@ -1052,8 +1066,8 @@ func (s *Spooler) blockedReason() string {
 	}
 	// Documento fiscal abierto en la impresora que ninguna sesión del spooler
 	// reclama: una factura colgada. Emitir encima entremezclaría ítems.
-	// Se cura con RecoverOpenDocument (101) y el estado se refresca con la
-	// respuesta del cierre.
+	// Se cura con RecoverOpenDocument (cierre del driver) y el estado se
+	// refresca con la respuesta del cierre.
 	s.schedMu.Lock()
 	docOpen := s.docOpen
 	s.schedMu.Unlock()

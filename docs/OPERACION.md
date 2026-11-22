@@ -7,16 +7,27 @@
 | `SpoolerFiscalServer` | PC con la impresora | `server.exe` |
 | `SpoolerFiscalAgent` | cada estación | `agent.exe` |
 
+La forma recomendada de instalarlos es [`INSTALAR.md`](INSTALAR.md) (servicio con
+inicio automático, reinicio ante fallos y permisos restringidos).
+
 ```powershell
-sc query SpoolerFiscalServer
-sc stop SpoolerFiscalServer
-sc start SpoolerFiscalServer
+Get-Service SpoolerFiscalServer, SpoolerFiscalAgent
+sc.exe qc SpoolerFiscalServer        # START_TYPE: AUTO_START
+sc.exe qfailure SpoolerFiscalServer  # acciones de reinicio
+sc.exe stop SpoolerFiscalServer
+sc.exe start SpoolerFiscalServer
+
 # modo consola para diagnóstico (detenga el servicio antes)
-.\bin\server.exe -console -config .\configs\server.yaml
+C:\SpoolerFiscal\server.exe -console -config C:\SpoolerFiscal\configs\server.yaml
 ```
 
-Los servicios arrancan automáticamente (`start= auto`) y `sc failure` los reinicia
-a los 5 s, 10 s y 30 s si terminan con error.
+- El servidor arranca con `AUTO_START` y se reinicia a los 5 s, 10 s y 30 s si
+  termina con error (contador diario).
+- El agente usa `delayed-auto`: arranca automáticamente unos 30 s después del
+  inicio, cuando com0com ya cargó. Si el COM aún no está, reintenta con backoff
+  sin detenerse.
+- El servicio fija su directorio de trabajo en el del ejecutable, así las rutas
+  relativas de `data\` y `logs\` no acaban en `C:\Windows\System32`.
 
 ## Logs y rotación
 
@@ -44,6 +55,28 @@ icacls C:\SpoolerFiscal\data /inheritance:r /grant:r "*S-1-5-18:F" "*S-1-5-32-54
 Los scripts `install-server.ps1` e `install-agent.ps1` aplican esta ACL. El modo
 consola debe ejecutarse como administrador (o como el usuario que instaló),
 porque el token ya no es legible por el grupo `Usuarios`.
+
+## Seguridad: token por estación y mTLS
+
+- `token`: token compartido para la API externa y para las estaciones que no
+  tengan uno propio.
+- `station_tokens`: un token por estación. Con token propio, esa estación **sólo**
+  se representa con su token: una petición que pida otra estación recibe `403`, y
+  el token compartido deja de servirle. Una caja comprometida no puede facturar
+  como otra.
+- `tls.enabled` con `cert_file`/`key_file`: HTTPS.
+- `tls.ca_file`: **mTLS**. El servidor exige certificado de cliente firmado por
+  esa CA; el agente configura `cert_file`/`key_file` (los dos juntos).
+
+Comprobación rápida (con `token-caja-01` de `CAJA-01`):
+
+```powershell
+# debe responder 403: el token de CAJA-01 no emite como CAJA-02
+curl.exe -i -X POST http://127.0.0.1:8080/v1/commands `
+  -H "Authorization: Bearer token-caja-01" `
+  -H "Content-Type: application/json" `
+  -d "{\"station\":\"CAJA-02\",\"command\":\"S2\"}"
+```
 
 ## Capacidad y tiempos de espera
 
@@ -74,6 +107,19 @@ JSON); cada factura retiene el turno hasta el `101`,
 igual que una caja. Errores frecuentes: `409 printer_blocked` (papel o memoria),
 `504 timeout` (no se imprimió) y `429 queue_full`. Detalle en
 [`API.md`](API.md).
+
+## Panel de operación
+
+`http://<servidor>:8080/admin` sirve un panel para el operador:
+
+- estado de la impresora, cola, documento abierto y motivo de bloqueo;
+- últimos trabajos con **Cancelar** (si no llegó a papel) y **Reintentar** (si
+  está pausado sin líneas impresas);
+- últimos documentos emitidos.
+
+La página no contiene secretos: pide el token y lo guarda sólo en la pestaña.
+Las mismas operaciones están en `POST /v1/jobs/{id}/cancel` y `/retry`. Si el
+operador no debe ver el panel, bloquéelo en el firewall o no lo publique.
 
 ## Qué registrar en la auditoría
 
@@ -209,9 +255,15 @@ almacén de Windows o un gestor de secretos.
 
 1. Detenga los servicios.
 2. Respalde `data\` y `configs\`.
-3. Reemplace `bin\server.exe` y `bin\agent.exe` (misma versión en todos lados).
+3. Reemplace `bin\server.exe` y `bin\agent.exe` (misma versión en todos lados),
+   o vuelva a ejecutar `INSTALAR.bat` sobre la instalación existente: conserva la
+   configuración y solo actualiza el binario y el servicio.
 4. Arranque primero el servidor y luego los agentes.
-5. Verifique `Ping` en los logs (`conectado al spooler … version_servidor`).
+5. Ejecute la verificación de la impresora y compare con la línea base
+   ([`PUESTA_EN_MARCHA.md`](PUESTA_EN_MARCHA.md)):
+   `sc stop SpoolerFiscalServer`, `.\bin\verificar\verificar.exe -config .\configs\server.yaml -out .\data\verificacion-post.json`,
+   `sc start SpoolerFiscalServer`.
+6. Verifique `Ping` en los logs (`conectado al spooler … version_servidor`).
 
 ## Límites y decisiones operativas
 

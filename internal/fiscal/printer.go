@@ -153,16 +153,49 @@ type CorrelativeSource interface {
 	GetCorrelative(ctx context.Context) (Info, error)
 }
 
+// DocumentCloser es una capacidad opcional del driver: indica el comando con
+// el que se cierra por recuperación un documento que la impresora dejó abierto
+// (factura colgada por un corte). TFHKA usa "101"; IxBatch usa "@Close". Sin
+// esta interfaz el spooler asume el cierre de TFHKA.
+type DocumentCloser interface {
+	CloseDocumentCommand() []byte
+}
+
+// NormalizeCommandTerminator ajusta el terminador de comandos que exige el
+// protocolo del driver. IxBatch delimita por línea: un CR suelto no cierra el
+// comando y la impresora espera hasta el timeout. En TFHKA el terminador es
+// configurable y se respeta tal cual.
+func NormalizeCommandTerminator(driver, terminator string) string {
+	switch strings.ToLower(strings.TrimSpace(driver)) {
+	case BrandHasar, BrandBixolon, BrandEpson:
+		if !strings.Contains(terminator, "\n") {
+			return "\r\n"
+		}
+	}
+	return terminator
+}
+
 // driverRegistry permite soportar varias marcas de impresoras fiscales. Cada
 // marca implementa la interfaz Printer (y opcionalmente CorrelativeSource) y se
-// registra aquí; la configuración elige por nombre. TFHKA está completo; otras
-// marcas se agregan con RegisterDriver cuando su protocolo esté verificado.
+// registra aquí; la configuración elige por nombre.
+//
+// Familias implementadas:
+//   - tfhka: protocolo ASCII de The Factory HKA.
+//   - hasar, bixolon, epson: protocolo IxBatch (@Comando|param...); Epson
+//     antepone "0xESTADO|0xERROR|" a cada respuesta. Comparten la misma
+//     implementación (IxBatch) y sólo cambia el nombre del modelo/envoltorio.
+//
+// Otras marcas se agregan con RegisterDriver cuando su protocolo esté
+// verificado contra hardware o contra una referencia byte a byte.
 type driverFactory func(Options) (Printer, error)
 
 var (
 	driverMu       sync.RWMutex
 	driverRegistry = map[string]driverFactory{
-		BrandTFHKA: func(o Options) (Printer, error) { return newTFHKA(o), nil },
+		BrandTFHKA:   func(o Options) (Printer, error) { return newTFHKA(o), nil },
+		BrandHasar:   func(o Options) (Printer, error) { return newIxBatch(BrandHasar, o), nil },
+		BrandBixolon: func(o Options) (Printer, error) { return newIxBatch(BrandBixolon, o), nil },
+		BrandEpson:   func(o Options) (Printer, error) { return newIxBatch(BrandEpson, o), nil },
 	}
 )
 

@@ -66,8 +66,9 @@ try {
     if (-not $NoStrip) { $strip = @("-s", "-w") }
 
     $targets = @(
-        @{ Name = "server.exe"; Package = "./cmd/server"; Label = "servidor" },
-        @{ Name = "agent.exe";  Package = "./cmd/agent";  Label = "agente" }
+        @{ Name = "server.exe";    Package = "./cmd/server";    Label = "servidor" },
+        @{ Name = "agent.exe";     Package = "./cmd/agent";     Label = "agente" },
+        @{ Name = "verificar.exe"; Package = "./cmd/verificar"; Label = "verificador" }
     )
 
     foreach ($target in $targets) {

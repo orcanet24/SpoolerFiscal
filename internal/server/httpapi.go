@@ -20,6 +20,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"spoolerfiscal/internal/config"
 	"spoolerfiscal/internal/fiscal"
 )
 
@@ -30,6 +31,7 @@ const ProtocolVersion uint32 = 1
 // HTTPConfig configura la API REST.
 type HTTPConfig struct {
 	Token           string
+	StationTokens   map[string]string
 	AllowedStations []string
 	Version         string
 	Driver          string
@@ -109,6 +111,10 @@ func (a *HTTPAPI) Handler() http.Handler {
 	mux.HandleFunc("GET /docs/diccionario", a.handleDiccionario)
 	mux.HandleFunc("GET /docs/diccionario/{$}", a.handleDiccionario)
 	mux.HandleFunc("GET /docs/diccionario/index.html", a.handleDiccionario)
+	// Panel de operación: la página es pública (no contiene secretos), sus
+	// llamadas exigen token.
+	mux.HandleFunc("GET /admin", a.handleAdmin)
+	mux.HandleFunc("GET /admin/{$}", a.handleAdmin)
 
 	mux.HandleFunc("GET /v1/health", a.handleHealth)
 	mux.HandleFunc("GET /v1/status", a.auth(a.handleStatus))
@@ -119,6 +125,8 @@ func (a *HTTPAPI) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/invoices/structured", a.auth(a.handleStructuredInvoice))
 	mux.HandleFunc("GET /v1/jobs", a.auth(a.handleJobs))
 	mux.HandleFunc("GET /v1/jobs/{id}", a.auth(a.handleJob))
+	mux.HandleFunc("POST /v1/jobs/{id}/cancel", a.auth(a.handleCancelJob))
+	mux.HandleFunc("POST /v1/jobs/{id}/retry", a.auth(a.handleRetryJob))
 	return a.recoverer(a.logRequests(mux))
 }
 
@@ -302,6 +310,67 @@ func (a *HTTPAPI) handleJob(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// handleCancelJob descarta un trabajo que todavía no llegó a papel (encolado o
+// pausado, avance cero). Es la única cancelación segura: una factura que ya
+// empezó a imprimirse no se puede "desimprimir".
+func (a *HTTPAPI) handleCancelJob(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	job, err := a.store.CancelJob(r.Context(), id)
+	switch {
+	case errors.Is(err, ErrJobNotFound):
+		writeError(w, http.StatusNotFound, "not_found", "trabajo no encontrado", nil)
+		return
+	case errors.Is(err, ErrJobNotCancelable):
+		writeError(w, http.StatusConflict, "job_not_cancelable",
+			fmt.Sprintf("el trabajo está en estado %q: una factura que ya empezó a imprimirse no se cancela, requiere revisión del operador", job.Status),
+			&errorDetails{JobID: job.ID})
+		return
+	case err != nil:
+		a.log.Error("cancelar trabajo", "job", id, "error", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "no se pudo cancelar el trabajo", nil)
+		return
+	}
+	// Cancelar sólo es posible sin líneas impresas, así que liberar la clave de
+	// idempotencia es seguro: el mismo pedido puede re-emitirse sin quedar
+	// bloqueado por el 202 de un trabajo que nunca llegó a papel.
+	if job.IdemKey != "" {
+		if derr := a.store.IdempotencyDelete(job.IdemKey); derr != nil {
+			a.log.Warn("liberar idempotencia al cancelar", "job", job.ID, "error", derr)
+		}
+	}
+	a.log.Info("trabajo cancelado por el operador", "job", job.ID, "estacion", job.Station)
+	writeJSON(w, http.StatusOK, jobDetailJSONOf(&job))
+}
+
+// handleRetryJob devuelve a la cola un trabajo pausado o encolado que no
+// imprimió nada. Un trabajo con avance no se reintenta: la factura quedaría
+// partida en dos documentos.
+func (a *HTTPAPI) handleRetryJob(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	job, err := a.store.RetryJob(r.Context(), id)
+	switch {
+	case errors.Is(err, ErrJobNotFound):
+		writeError(w, http.StatusNotFound, "not_found", "trabajo no encontrado", nil)
+		return
+	case errors.Is(err, ErrJobNotRetryable):
+		msg := fmt.Sprintf("el trabajo está en estado %q y no se puede reintentar", job.Status)
+		if job.Cursor > 0 {
+			msg = fmt.Sprintf("el trabajo imprimió %d de %d líneas: no se reimprime a mitad de factura; re-someta la factura completa",
+				job.Cursor, len(job.Lines))
+		}
+		writeError(w, http.StatusConflict, "job_not_retryable", msg, &errorDetails{JobID: job.ID})
+		return
+	case err != nil:
+		a.log.Error("reintentar trabajo", "job", id, "error", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "no se pudo reintentar el trabajo", nil)
+		return
+	}
+	a.log.Info("trabajo reencolado por el operador", "job", job.ID, "estacion", job.Station)
+	writeJSON(w, http.StatusAccepted, jobAcceptedJSON{
+		JobID: job.ID, Status: job.Status, Station: job.Station, Lines: len(job.Lines),
+	})
+}
+
 type jobSummaryJSON struct {
 	JobID     string    `json:"job_id"`
 	Station   string    `json:"station"`
@@ -392,7 +461,7 @@ func responseText(b []byte) string {
 // runCommand recibe un comando fiscal crudo y devuelve la respuesta de la
 // impresora. Es el extremo que usa el agente de estación (COM virtual).
 func (a *HTTPAPI) runCommand(ctx context.Context, req commandRequest, idemKey string) (int, any) {
-	if status, msg := a.validateStation(req.Station); status != 0 {
+	if status, msg := a.validateStation(ctx, req.Station); status != 0 {
 		return status, errorEnvelopeOf(statusCode(status), msg, nil)
 	}
 	cmd := []byte(req.Command)
@@ -445,10 +514,19 @@ func (a *HTTPAPI) runCommand(ctx context.Context, req commandRequest, idemKey st
 // runStructuredInvoice compila ítems a líneas TFHKA, valida los totales y
 // ejecuta la factura con la misma ruta atómica que /v1/invoices.
 func (a *HTTPAPI) runStructuredInvoice(ctx context.Context, req structuredInvoiceRequest, idemKey, requestHash string, async bool) (int, any) {
-	if status, msg := a.validateStation(req.Station); status != 0 {
+	if status, msg := a.validateStation(ctx, req.Station); status != 0 {
 		return status, errorEnvelopeOf(statusCode(status), msg, nil)
 	}
-	lines, totals, err := compileInvoice(req.Items, a.cfg.MaxLines)
+	// El compilador de ítems conoce las tasas y el formato de TFHKA. Con otra
+	// marca la vía correcta es /v1/invoices con las líneas del protocolo
+	// nativo: inventar una secuencia IxBatch sin validar contra el hardware
+	// sería un error fiscal, no una comodidad.
+	if !strings.EqualFold(a.cfg.Driver, fiscal.BrandTFHKA) {
+		return http.StatusNotImplemented, errorEnvelopeOf("structured_not_supported",
+			fmt.Sprintf("el compilador structured emite protocolo TFHKA y el driver activo es %q; "+
+				"envíe las líneas nativas por /v1/invoices (@OpenFiscalReceipt, @PrintLineItem, @Close)", a.cfg.Driver), nil)
+	}
+	lines, totals, err := compileInvoice(req, a.cfg.MaxLines)
 	if err != nil {
 		return http.StatusBadRequest, errorEnvelopeOf("invalid_request", err.Error(), nil)
 	}
@@ -500,7 +578,7 @@ func validateSequence(step func([]byte) fiscal.Step, lines []string) (int, strin
 		}
 	}
 	if state != stateClosed {
-		return len(lines) - 1, "la factura no se cierra (falta 101 al final)"
+		return len(lines) - 1, "la factura no se cierra (falta el comando de cierre: 101 en TFHKA, @Close en IxBatch)"
 	}
 	return -1, ""
 }
@@ -510,7 +588,7 @@ func (a *HTTPAPI) runInvoice(ctx context.Context, req invoiceRequest, idemKey, r
 	if async {
 		mode = "async"
 	}
-	if status, msg := a.validateStation(req.Station); status != 0 {
+	if status, msg := a.validateStation(ctx, req.Station); status != 0 {
 		return status, errorEnvelopeOf(statusCode(status), msg, nil)
 	}
 	if len(req.Lines) == 0 {
@@ -530,7 +608,7 @@ func (a *HTTPAPI) runInvoice(ctx context.Context, req invoiceRequest, idemKey, r
 	// el documento y el cierre es único y final.
 	if a.spooler.Step([]byte(req.Lines[0])) != fiscal.StepOpenDocument {
 		return http.StatusBadRequest, errorEnvelopeOf("invalid_request",
-			"la primera línea debe abrir una factura (ítem con !, \" o #)", nil)
+			"la primera línea debe abrir el documento (ítem TFHKA, datos de cliente iR*/iS*, o @OpenFiscalReceipt en IxBatch)", nil)
 	}
 	if idx, msg := validateSequence(a.spooler.Step, req.Lines); idx >= 0 {
 		return http.StatusBadRequest, errorEnvelopeOf("invalid_request", msg, &errorDetails{LineIndex: &idx})
@@ -682,7 +760,7 @@ func transientJobError(err error) (reason string, ok bool) {
 
 // jobFailure decide pausar o abortar. Pausar sólo si ninguna línea llegó a
 // papel y el impedimento es transitorio. Con avance (o error definitivo) se
-// aborta: se intenta el cierre 101 de recuperación y el integrador re-somete.
+// aborta: se intenta el cierre de recuperación del driver y el integrador re-somete.
 func (a *HTTPAPI) jobFailure(ctx context.Context, job *PrintJob, lineIdx int, err error, out invoiceResponse) jobOutcome {
 	if _, transient := transientJobError(err); transient && job.Cursor == 0 {
 		if serr := a.store.SetJobStatus(context.Background(), job.ID, JobPaused, err.Error(), nil); serr != nil {
@@ -923,21 +1001,25 @@ func (a *HTTPAPI) idempotent(w http.ResponseWriter, r *http.Request, fn func(has
 // ---------- validación y errores ----------
 
 // validateStation devuelve (0, "") si la estación es válida; si no, un estado
-// HTTP y el mensaje.
-func (a *HTTPAPI) validateStation(station string) (int, string) {
+// HTTP y el mensaje. Si la petición se autenticó con el token de una estación,
+// sólo puede emitir en su propio nombre; y una estación con token propio no se
+// representa con el token compartido.
+func (a *HTTPAPI) validateStation(ctx context.Context, station string) (int, string) {
 	station = strings.TrimSpace(station)
 	if station == "" {
 		return http.StatusBadRequest, "station es obligatorio (ej. \"ECOM-01\")"
 	}
-	if len(station) > 64 {
-		return http.StatusBadRequest, "station demasiado largo (máx. 64)"
+	if !config.ValidStationID(station) {
+		return http.StatusBadRequest, "station sólo admite letras, números, - _ . : (máx. 64)"
 	}
-	for _, c := range station {
-		ok := c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' ||
-			c == '-' || c == '_' || c == '.' || c == ':'
-		if !ok {
-			return http.StatusBadRequest, "station sólo admite letras, números, - _ . :"
+	if bound, ok := stationFromContext(ctx); ok {
+		if bound != station {
+			return http.StatusForbidden,
+				fmt.Sprintf("el token de la estación %q no puede emitir como %q", bound, station)
 		}
+	} else if _, has := a.cfg.StationTokens[station]; has {
+		return http.StatusForbidden,
+			fmt.Sprintf("la estación %q exige su token propio (station_tokens)", station)
 	}
 	if len(a.allowed) > 0 {
 		if _, ok := a.allowed[station]; !ok {
@@ -1003,22 +1085,35 @@ func writeError(w http.ResponseWriter, status int, code, msg string, details *er
 
 // ---------- middleware ----------
 
+// stationTokenKey identifica la estación a la que está atado un token propio.
+type stationTokenKey struct{}
+
+// stationFromContext devuelve la estación vinculada al token de la petición.
+// No hay valor cuando se autenticó con el token compartido.
+func stationFromContext(ctx context.Context) (string, bool) {
+	st, ok := ctx.Value(stationTokenKey{}).(string)
+	return st, ok && st != ""
+}
+
 func (a *HTTPAPI) auth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if !a.validToken(r) {
+		station, ok := a.authenticate(r)
+		if !ok {
 			w.Header().Set("WWW-Authenticate", `Bearer realm="spooler-fiscal"`)
 			writeError(w, http.StatusUnauthorized, "unauthorized", "token inválido o ausente", nil)
 			return
+		}
+		if station != "" {
+			r = r.WithContext(context.WithValue(r.Context(), stationTokenKey{}, station))
 		}
 		next(w, r)
 	}
 }
 
-func (a *HTTPAPI) validToken(r *http.Request) bool {
-	want := a.cfg.Token
-	if want == "" {
-		return false
-	}
+// authenticate devuelve la estación vinculada al token ("" para el token
+// compartido) y si el token es válido. Todos los tokens se comparan en tiempo
+// constante; no se corta el bucle en la primera coincidencia.
+func (a *HTTPAPI) authenticate(r *http.Request) (string, bool) {
 	got := strings.TrimSpace(r.Header.Get("Authorization"))
 	if len(got) > 7 && strings.EqualFold(got[:7], "bearer ") {
 		got = strings.TrimSpace(got[7:])
@@ -1027,9 +1122,23 @@ func (a *HTTPAPI) validToken(r *http.Request) bool {
 		got = strings.TrimSpace(r.Header.Get("X-Spooler-Token"))
 	}
 	if got == "" {
-		return false
+		return "", false
 	}
-	return subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1
+	if want := a.cfg.Token; want != "" &&
+		subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1 {
+		return "", true
+	}
+	want := []byte(got)
+	bound, found := "", false
+	for station, token := range a.cfg.StationTokens {
+		if token == "" {
+			continue
+		}
+		if subtle.ConstantTimeCompare(want, []byte(token)) == 1 {
+			bound, found = station, true
+		}
+	}
+	return bound, found
 }
 
 func (a *HTTPAPI) decode(w http.ResponseWriter, r *http.Request, dst any) ([]byte, bool) {

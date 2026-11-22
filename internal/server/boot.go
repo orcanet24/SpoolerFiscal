@@ -3,11 +3,15 @@ package server
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
+	"os"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -41,6 +45,15 @@ func NewRuntime(cfg config.Server, log *slog.Logger) (*Runtime, error) {
 		return nil, err
 	}
 
+	// El terminador que normaliza los comandos del cliente debe ser el que
+	// exige el protocolo del driver: IxBatch no cierra el comando con CR suelto.
+	terminator := fiscal.NormalizeCommandTerminator(cfg.Printer.Driver, cfg.Printer.CommandTerminator)
+	if terminator != cfg.Printer.CommandTerminator {
+		log.Warn("command_terminator ajustado al protocolo del driver",
+			"driver", cfg.Printer.Driver, "configurado", strconv.Quote(cfg.Printer.CommandTerminator),
+			"usado", strconv.Quote(terminator))
+	}
+
 	spooler := NewSpooler(printer, store, SpoolerConfig{
 		MaxPending:            cfg.Queue.MaxPending,
 		DefaultTimeout:        ms(cfg.Queue.DefaultTimeoutMS),
@@ -51,7 +64,7 @@ func NewRuntime(cfg config.Server, log *slog.Logger) (*Runtime, error) {
 		CorrelativeMaxAge:     ms(cfg.Queue.CorrelativeSyncMaxAgeMS),
 		AutoCloseOpenDocument: cfg.Queue.AutoCloseOpenDocument == nil || *cfg.Queue.AutoCloseOpenDocument,
 		LogCommands:           cfg.Database.LogCommands,
-		CommandTerminator:     cfg.Printer.CommandTerminator,
+		CommandTerminator:     terminator,
 		Guard: GuardConfig{
 			BlockOnPaperOut:   cfg.Guard.BlockOnPaperOut,
 			BlockOnMemoryFull: cfg.Guard.BlockOnMemoryFull,
@@ -62,6 +75,7 @@ func NewRuntime(cfg config.Server, log *slog.Logger) (*Runtime, error) {
 
 	httpAPI := NewHTTPAPI(HTTPConfig{
 		Token:             cfg.Token,
+		StationTokens:     cfg.StationTokens,
 		AllowedStations:   cfg.AllowedStations,
 		Version:           Version,
 		Driver:            printer.Driver(),
@@ -324,7 +338,23 @@ func httpTLSConfig(cfg config.TLS) (*tls.Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("cargar certificado para la API: %w", err)
 	}
-	return &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12}, nil
+	tlsCfg := &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12}
+	// ca_file activa mTLS: el cliente (agente) debe presentar un certificado
+	// firmado por esa CA. Sin ca_file, TLS es de un solo sentido (el agente
+	// autentica al servidor y el token autentica al agente).
+	if strings.TrimSpace(cfg.CAFile) != "" {
+		pem, err := os.ReadFile(cfg.CAFile)
+		if err != nil {
+			return nil, fmt.Errorf("leer CA para mTLS: %w", err)
+		}
+		pool := x509.NewCertPool()
+		if !pool.AppendCertsFromPEM(pem) {
+			return nil, fmt.Errorf("la CA %s no contiene certificados válidos", cfg.CAFile)
+		}
+		tlsCfg.ClientCAs = pool
+		tlsCfg.ClientAuth = tls.RequireAndVerifyClientCert
+	}
+	return tlsCfg, nil
 }
 
 func ms(v int) time.Duration { return time.Duration(v) * time.Millisecond }

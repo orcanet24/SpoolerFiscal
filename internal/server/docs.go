@@ -19,6 +19,19 @@ var embeddedOpenAPI []byte
 //go:embed web/diccionario.html
 var embeddedDiccionario []byte
 
+//go:embed web/admin.html
+var embeddedAdmin []byte
+
+// handleAdmin sirve el panel de operación. La página no contiene secretos: el
+// token se pide en el navegador y sólo viaja a la API en cada llamada.
+func (a *HTTPAPI) handleAdmin(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(embeddedAdmin)
+}
+
 // handleDocsRoot redirige la raíz y /help al manual.
 func (a *HTTPAPI) handleDocsRoot(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/docs", http.StatusFound)
