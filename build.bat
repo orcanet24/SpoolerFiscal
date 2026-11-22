@@ -6,6 +6,7 @@ set "BIN=%ROOT%bin"
 set "CLIENTE=%BIN%\cliente"
 set "SERVER=%BIN%\server"
 set "SIMPRINT=%BIN%\simprint"
+set "VERIFICAR=%BIN%\verificar"
 
 where go >nul 2>nul
 if errorlevel 1 (
@@ -18,6 +19,8 @@ if errorlevel 1 goto :error
 if not exist "%SERVER%\configs" mkdir "%SERVER%\configs"
 if errorlevel 1 goto :error
 if not exist "%SIMPRINT%" mkdir "%SIMPRINT%"
+if errorlevel 1 goto :error
+if not exist "%VERIFICAR%" mkdir "%VERIFICAR%"
 if errorlevel 1 goto :error
 
 if not exist "%CLIENTE%\configs\agent.yaml" copy "%ROOT%configs\agent.yaml" "%CLIENTE%\configs\agent.yaml" >nul
@@ -66,6 +69,13 @@ if errorlevel 1 (
     popd
     goto :error
 )
+
+echo Compilando verificador de puesta en marcha...
+go build -trimpath -ldflags "-s -w" -o "%VERIFICAR%\verificar.exe" .\cmd\verificar
+if errorlevel 1 (
+    popd
+    goto :error
+)
 popd
 
 echo.
@@ -77,6 +87,7 @@ echo   Servidor: %SERVER%\server.exe
 echo   Config:   %SERVER%\configs\server.yaml
 echo   Entorno:  %SERVER%\.env
 echo   Simprint: %SIMPRINT%\simprint.exe  (emulador fiscal con salida a termica)
+echo   Verificar: %VERIFICAR%\verificar.exe  (puesta en marcha contra la impresora)
 echo.
 echo Revise y personalice los archivos .env antes de ejecutar.
 exit /b 0

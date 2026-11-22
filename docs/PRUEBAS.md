@@ -166,10 +166,45 @@ La **idempotencia** evita reemitir: repetir un `POST` con la misma
 
 ---
 
-## 6. Sobre otras marcas de impresora
+## 6. Otras marcas de impresora
 
-El spooler **solo implementa el driver `tfhka`** (The Factory HKA). El
-simulador (SimuladorFiscalGO) puede emular además Hasar, Bixolon y Epson, pero
-esos modelos hablan otro protocolo (IxBatch) y **no** los entiende el spooler
-hasta que se implemente y registre su driver (`fiscal.RegisterDriver`). Los
-ejemplos de este documento son, por eso, con TFHKA.
+`printer.driver` acepta cuatro valores: `tfhka`, `hasar`, `bixolon` y `epson`.
+Los tres últimos comparten el protocolo **IxBatch** (`@OpenFiscalReceipt`,
+`@PrintLineItem`, `@Close`, `@Status`); Epson además antepone `0xESTADO|0xERROR|`
+a cada respuesta y el driver lo interpreta sin que cambie nada en el cliente.
+
+Para probarlos con el simulador, arránquelo con la marca correspondiente y
+ajuste el servidor:
+
+```powershell
+C:\Proyectos\GO\SimuladorFiscalGO\simuladorfiscal.exe serve --model hasar --addr 127.0.0.1:2011
+```
+
+```yaml
+printer:
+  driver: hasar
+  transport: tcp
+  tcp_address: 127.0.0.1:2011
+  # status_probe puede quedar en S2: el driver IxBatch lo cambia a @Status.
+```
+
+Una factura por la vía de líneas nativas:
+
+```powershell
+curl.exe -X POST http://127.0.0.1:8080/v1/invoices `
+  -H "Authorization: Bearer CAMBIAR-ESTE-TOKEN" `
+  -H "Content-Type: application/json" `
+  -H "Idempotency-Key: hasar-1" `
+  -d "{\"station\":\"CAJA-01\",\"lines\":[\"@OpenFiscalReceipt\",\"@PrintLineItem|CAFE|1.000|10.00|general\",\"@Close\"]}"
+```
+
+Notas de la vía IxBatch:
+
+- El número del documento lo reporta el **cierre** (`@Close` →
+  `@Response|OK|0|Factura N cerrada|...`); no hay una consulta tipo `S1` en el
+  subconjunto implementado, así que la conciliación previa a imprimir no existe
+  y el spooler audita el número en cuanto la impresora lo cierra.
+- `/v1/invoices/structured` sigue siendo **solo TFHKA** (responde `501
+  structured_not_supported`): con IxBatch use `/v1/invoices` con las líneas del
+  protocolo.
+- La recuperación de un documento colgado usa `@Close`, no `101`.

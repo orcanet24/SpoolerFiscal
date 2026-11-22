@@ -42,6 +42,31 @@ impresora.
 `!` = alícuota general (16 %), `"` = reducida (8 %), `#` = adicional (30 %),
 espacio = exento.
 
+### Secuencia canónica de una factura
+
+La referencia ordena la venta así (y el compilador `structured` la replica):
+
+```
+iR*J-12345678-9            datos del cliente (RIF)
+iS*CLIENTE C.A.            nombre
+i01Av. Principal           dirección
+i02 0212-1234567           teléfono
+!   2.000     50.00HARINA  ítems
+"   3.000     10.50PAN
+3                          subtotal impreso (si hay pagos)
+70010.00                   descuento global
+7015.00                    recargo global
+103tarjeta                 medio de pago (sólo si no es efectivo)
+100126.50                  pago
+101                        cierre y totalización
+```
+
+Los datos del cliente van **antes** del primer ítem. Por eso el spooler
+clasifica esas líneas como apertura de documento: el turno exclusivo se toma
+desde la primera línea y ninguna otra estación puede intercalar su factura entre
+el cliente y los ítems. El documento en la impresora se abre con el primer ítem;
+el turno se libera con `101`.
+
 ## 3. Bloque de estado y errores
 
 Las respuestas pueden venir precedidas por dos bytes de estado en hexadecimal:

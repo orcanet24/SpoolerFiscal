@@ -83,6 +83,21 @@ func (s *TFHKASim) Handle(raw string) string {
 		return "0|0|1|0.00|0.00|0.00|0"
 	case cmd == "S5":
 		return "SIMTFHKA01|J-12345678-9|1|4.00|3.60|7"
+	case cmd == "3":
+		return "0|Subtotal"
+	case strings.HasPrefix(cmd, "700"):
+		return "0|Descuento"
+	case strings.HasPrefix(cmd, "701"):
+		return "0|Recargo"
+	case strings.HasPrefix(cmd, "103"):
+		return "0|Descripcion pago"
+	case strings.HasPrefix(cmd, "100"):
+		return "0|Pago"
+	case strings.HasPrefix(cmd, "iR*"), strings.HasPrefix(cmd, "iS*"),
+		strings.HasPrefix(cmd, "i01"), strings.HasPrefix(cmd, "i02"),
+		strings.HasPrefix(cmd, "iF*"), strings.HasPrefix(cmd, "iD*"),
+		strings.HasPrefix(cmd, "iI*"):
+		return "0|Dato registrado"
 	case cmd == "U0X", cmd == "U1X":
 		return "0|Reporte X #1|Ventas: 116.00|IVA: 16.00|Impreso:1"
 	case cmd == "U0Z", cmd == "U1Z":

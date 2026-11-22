@@ -50,6 +50,10 @@ func newTFHKA(opts Options) *TFHKA {
 // Driver identifica la implementación.
 func (p *TFHKA) Driver() string { return BrandTFHKA }
 
+// CloseDocumentCommand implementa DocumentCloser: en TFHKA el cierre
+// totalizador de recuperación es 101.
+func (p *TFHKA) CloseDocumentCommand() []byte { return []byte("101") }
+
 // Step clasifica el comando según el protocolo TFHKA: la primera línea de ítem
 // abre la factura (prefijo de alícuota), 101/81 la cierran y los documentos no
 // fiscales se abren con 80$ y se cierran con 81.
@@ -71,6 +75,17 @@ func (p *TFHKA) Step(cmd []byte) Step {
 	switch trimmed[0] {
 	case 'S', 'U', '9':
 		return StepNeutral
+	}
+	// Datos del documento (cliente y referencias de nota). Se clasifican como
+	// apertura para que el turno exclusivo se tome desde la primera línea: el
+	// orden canónico de TFHKA manda el cliente antes de los ítems y, sin esto,
+	// otra estación podría intercalar su documento entre el cliente y el primer
+	// ítem.
+	if strings.HasPrefix(trimmed, "iR*") || strings.HasPrefix(trimmed, "iS*") ||
+		strings.HasPrefix(trimmed, "i01") || strings.HasPrefix(trimmed, "i02") ||
+		strings.HasPrefix(trimmed, "iF*") || strings.HasPrefix(trimmed, "iD*") ||
+		strings.HasPrefix(trimmed, "iI*") {
+		return StepOpenDocument
 	}
 	// El prefijo de alícuota es el primer carácter: espacio = exento.
 	switch raw[0] {

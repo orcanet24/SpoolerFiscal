@@ -350,7 +350,6 @@ func (s *Store) LoadPrinterInfo(ctx context.Context) (fiscal.Info, bool) {
 	}, true
 }
 
-// PruneCommands elimina la bitácora anterior a la fecha indicada.
 // IdempotencyGet devuelve la respuesta guardada para una clave de
 // idempotencia REST. ok=false cuando la clave no existe.
 func (s *Store) IdempotencyGet(key string) (requestHash string, status int, body []byte, ok bool, err error) {
@@ -392,6 +391,17 @@ func (s *Store) IdempotencyReplace(key string, status int, body []byte) error {
 	return nil
 }
 
+// IdempotencyDelete libera una clave de idempotencia. Se usa al cancelar un
+// trabajo que no llegó a papel: el mismo pedido puede re-emitirse con la misma
+// clave sin quedar bloqueado por un resultado que nunca se imprimió.
+func (s *Store) IdempotencyDelete(key string) error {
+	if _, err := s.db.ExecContext(context.Background(),
+		`DELETE FROM idempotency_keys WHERE key = ?`, key); err != nil {
+		return fmt.Errorf("liberar idempotencia: %w", err)
+	}
+	return nil
+}
+
 // PruneIdempotency elimina claves anteriores a la fecha dada.
 func (s *Store) PruneIdempotency(before time.Time) (int64, error) {
 	res, err := s.db.ExecContext(context.Background(),
@@ -402,6 +412,7 @@ func (s *Store) PruneIdempotency(before time.Time) (int64, error) {
 	return res.RowsAffected()
 }
 
+// PruneCommands elimina la bitácora anterior a la fecha indicada.
 func (s *Store) PruneCommands(ctx context.Context, before time.Time) (int64, error) {
 	res, err := s.db.ExecContext(ctx, `DELETE FROM command_log WHERE at < ?`, before.Format(time.RFC3339Nano))
 	if err != nil {
@@ -482,6 +493,14 @@ type PrintJob struct {
 
 // ErrJobNotFound indica que el identificador no existe.
 var ErrJobNotFound = errors.New("store: trabajo de impresión no encontrado")
+
+// ErrJobNotCancelable indica que el trabajo ya no puede cancelarse: está en
+// curso, ya se imprimió o ya terminó.
+var ErrJobNotCancelable = errors.New("store: trabajo no cancelable")
+
+// ErrJobNotRetryable indica que el trabajo no puede reintentarse sin volver a
+// someter la factura completa (impresión parcial o estado final).
+var ErrJobNotRetryable = errors.New("store: trabajo no reintentable")
 
 func jobColumns() string {
 	return `id, station, session, idem_key, request_hash, client_ref, mode, lines,
@@ -595,6 +614,51 @@ func (s *Store) SetJobStatus(ctx context.Context, id, status, lastError string, 
 		return fmt.Errorf("estado del trabajo %s: %w", id, err)
 	}
 	return nil
+}
+
+// CancelJob marca como cancelado un trabajo que todavía no llegó a papel
+// (encolado o pausado, con avance cero). Devuelve el trabajo actualizado; si
+// no se pudo cancelar devuelve el trabajo con su estado real y
+// ErrJobNotCancelable (o ErrJobNotFound).
+func (s *Store) CancelJob(ctx context.Context, id string) (PrintJob, error) {
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE print_jobs SET status = ?, last_error = ?, updated_at = ?
+		 WHERE id = ? AND status IN (?, ?) AND cursor = 0`,
+		JobCanceled, "cancelado por el operador antes de imprimir",
+		time.Now().UTC().Format(time.RFC3339Nano), id, JobQueued, JobPaused)
+	if err != nil {
+		return PrintJob{}, fmt.Errorf("cancelar trabajo %s: %w", id, err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		job, gerr := s.GetJob(ctx, id)
+		if gerr != nil {
+			return PrintJob{}, gerr
+		}
+		return job, ErrJobNotCancelable
+	}
+	return s.GetJob(ctx, id)
+}
+
+// RetryJob devuelve a la cola asíncrona un trabajo pausado o encolado que no
+// imprimió ninguna línea, para que el despachador lo ejecute. Un trabajo con
+// avance (parcialmente impreso) no se reintenta: re-someter la factura es una
+// decisión de negocio, no un reintento técnico.
+func (s *Store) RetryJob(ctx context.Context, id string) (PrintJob, error) {
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE print_jobs SET status = ?, mode = 'async', last_error = '', updated_at = ?
+		 WHERE id = ? AND status IN (?, ?) AND cursor = 0`,
+		JobQueued, time.Now().UTC().Format(time.RFC3339Nano), id, JobQueued, JobPaused)
+	if err != nil {
+		return PrintJob{}, fmt.Errorf("reintentar trabajo %s: %w", id, err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		job, gerr := s.GetJob(ctx, id)
+		if gerr != nil {
+			return PrintJob{}, gerr
+		}
+		return job, ErrJobNotRetryable
+	}
+	return s.GetJob(ctx, id)
 }
 
 // ResumableJobs devuelve trabajos listos para (re)intentar: los pausados de

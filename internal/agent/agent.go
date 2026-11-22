@@ -70,12 +70,12 @@ type commandResponse struct {
 
 // Agent es el cliente HTTP del spooler en una estación.
 type Agent struct {
-	cfg    config.Agent
-	log    *slog.Logger
-	jobs   chan *request
-	seq    atomic.Uint64
-	frames atomic.Uint64
-	errs   atomic.Uint64
+	cfg     config.Agent
+	log     *slog.Logger
+	jobs    chan *request
+	seq     atomic.Uint64
+	frames  atomic.Uint64
+	errs    atomic.Uint64
 	retries atomic.Uint64
 
 	client  *http.Client
@@ -114,6 +114,17 @@ func New(cfg config.Agent, log *slog.Logger) *Agent {
 				} else {
 					tlsCfg.RootCAs = pool
 				}
+			}
+		}
+		// Certificado de cliente para mTLS: el servidor lo exige si tiene
+		// tls.ca_file configurado.
+		if cfg.Server.TLS.CertFile != "" && cfg.Server.TLS.KeyFile != "" {
+			cert, err := tls.LoadX509KeyPair(cfg.Server.TLS.CertFile, cfg.Server.TLS.KeyFile)
+			if err != nil {
+				log.Error("certificado de cliente TLS inválido", "error", err,
+					"cert", cfg.Server.TLS.CertFile, "key", cfg.Server.TLS.KeyFile)
+			} else {
+				tlsCfg.Certificates = []tls.Certificate{cert}
 			}
 		}
 		client.Transport = &http.Transport{TLSClientConfig: tlsCfg}

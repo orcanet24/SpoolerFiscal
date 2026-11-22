@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Spooler Fiscal — Operación</title>
+<style>
+  :root{
+    --bg:#f5f6f8; --card:#fff; --ink:#1d2430; --muted:#667085; --line:#e3e6ec;
+    --ok:#0f9d58; --warn:#b25e00; --bad:#c62828; --accent:#1a56db;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  header{background:#111827;color:#fff;padding:14px 20px;display:flex;gap:14px;
+    align-items:center;flex-wrap:wrap}
+  header h1{font-size:16px;margin:0;font-weight:600;letter-spacing:.2px}
+  header .sp{flex:1}
+  main{max-width:1200px;margin:18px auto;padding:0 16px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;
+    padding:16px;margin-bottom:16px;box-shadow:0 1px 2px rgba(16,24,40,.04)}
+  .card h2{font-size:14px;margin:0 0 12px;text-transform:uppercase;letter-spacing:.6px;
+    color:var(--muted)}
+  .row{display:flex;gap:12px;flex-wrap:wrap}
+  .stat{flex:1 1 150px;min-width:140px;border:1px solid var(--line);border-radius:8px;
+    padding:10px 12px}
+  .stat .k{font-size:12px;color:var(--muted)}
+  .stat .v{font-size:20px;font-weight:600;margin-top:2px}
+  .ok{color:var(--ok)} .warn{color:var(--warn)} .bad{color:var(--bad)}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);
+    vertical-align:top}
+  th{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px}
+  .mono{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:12px}
+  button{font:inherit;border:1px solid var(--line);background:#fff;color:var(--ink);
+    border-radius:6px;padding:5px 10px;cursor:pointer}
+  button:hover{background:#f0f2f6}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  button.primary:hover{filter:brightness(1.05)}
+  button.danger{color:var(--bad);border-color:#f0c4c4}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  input[type=password],input[type=text],select{font:inherit;padding:6px 9px;
+    border:1px solid var(--line);border-radius:6px;background:#fff}
+  .banner{padding:9px 12px;border-radius:8px;margin-bottom:12px;display:none}
+  .banner.err{display:block;background:#fdecec;color:var(--bad);border:1px solid #f5c2c2}
+  .banner.info{display:block;background:#eef4ff;color:#173a8a;border:1px solid #cddcff}
+  .muted{color:var(--muted)}
+  .tag{display:inline-block;padding:1px 8px;border-radius:999px;font-size:12px;
+    border:1px solid var(--line);background:#fafbfc}
+  .right{text-align:right}
+  .nowrap{white-space:nowrap}
+  #login{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  footer{color:var(--muted);font-size:12px;text-align:center;padding:8px 0 24px}
+</style>
+</head>
+<body>
+<header>
+  <h1>Spooler Fiscal — Operación</h1>
+  <span id="conn" class="tag">sin conectar</span>
+  <span class="sp"></span>
+  <div id="login">
+    <input id="token" type="password" placeholder="Token de la API" autocomplete="off">
+    <button id="connect" class="primary">Conectar</button>
+    <button id="logout" style="display:none">Salir</button>
+  </div>
+</header>
+
+<main>
+  <div id="banner" class="banner"></div>
+
+  <section class="card" id="statusCard" style="display:none">
+    <h2>Impresora y cola</h2>
+    <div class="row" id="stats"></div>
+    <p class="muted" id="blocked" style="margin:10px 0 0"></p>
+  </section>
+
+  <section class="card" id="jobsCard" style="display:none">
+    <h2>Cola de impresión (últimos trabajos)</h2>
+    <div class="row" style="margin-bottom:10px;align-items:center">
+      <label class="muted" for="filter">Estado</label>
+      <select id="filter">
+        <option value="">todos</option>
+        <option value="queued">queued</option>
+        <option value="printing">printing</option>
+        <option value="paused">paused</option>
+        <option value="aborted">aborted</option>
+        <option value="done">done</option>
+        <option value="canceled">canceled</option>
+      </select>
+      <span class="sp" style="flex:1"></span>
+      <label class="muted"><input id="auto" type="checkbox" checked> actualizar cada 3 s</label>
+      <button id="refresh">Actualizar</button>
+    </div>
+    <table>
+      <thead><tr>
+        <th>Trabajo</th><th>Estación</th><th>Estado</th><th>Avance</th>
+        <th>Creado</th><th>Error</th><th class="right">Acciones</th>
+      </tr></thead>
+      <tbody id="jobs"></tbody>
+    </table>
+    <p class="muted" id="jobsEmpty" style="display:none">Sin trabajos en la cola.</p>
+  </section>
+
+  <section class="card" id="docsCard" style="display:none">
+    <h2>Documentos emitidos (últimos 20)</h2>
+    <table>
+      <thead><tr>
+        <th>Secuencia</th><th>Tipo</th><th>Número</th><th>Estación</th>
+        <th>Emitido</th><th>Referencia</th>
+      </tr></thead>
+      <tbody id="docs"></tbody>
+    </table>
+  </section>
+
+  <footer>El token se guarda sólo en esta pestaña. El panel no expone datos sin autenticación.</footer>
+</main>
+
+<script>
+(function(){
+  "use strict";
+  var TOKEN_KEY = "spooler_token";
+  var token = sessionStorage.getItem(TOKEN_KEY) || "";
+  var timer = null;
+  var busy = false;
+
+  var $ = function(id){ return document.getElementById(id); };
+
+  function showBanner(msg, kind){
+    var b = $("banner");
+    b.className = "banner " + (kind || "err");
+    b.textContent = msg;
+    if(!msg){ b.className = "banner"; }
+  }
+
+  function api(path, opts){
+    opts = opts || {};
+    var headers = opts.headers || {};
+    headers["Authorization"] = "Bearer " + token;
+    if(opts.body){ headers["Content-Type"] = "application/json"; }
+    return fetch(path, {
+      method: opts.method || "GET",
+      headers: headers,
+      body: opts.body || null,
+      cache: "no-store"
+    }).then(function(r){
+      return r.text().then(function(text){
+        var data = null;
+        try { data = text ? JSON.parse(text) : null; } catch(e){ data = text; }
+        if(r.status === 401){
+          var err = new Error("token rechazado");
+          err.unauthorized = true;
+          throw err;
+        }
+        if(!r.ok){
+          var msg = (data && data.error && data.error.message) ?
+            data.error.message : ("HTTP " + r.status);
+          throw new Error(msg);
+        }
+        return data;
+      });
+    });
+  }
+
+  function connect(){
+    token = $("token").value.trim();
+    if(!token){ showBanner("Escriba el token de la API."); return; }
+    sessionStorage.setItem(TOKEN_KEY, token);
+    $("token").value = "";
+    showBanner("");
+    $("login").style.display = "none";
+    $("logout").style.display = "";
+    $("statusCard").style.display = "";
+    $("jobsCard").style.display = "";
+    $("docsCard").style.display = "";
+    refresh();
+    startTimer();
+  }
+
+  function logout(){
+    token = "";
+    sessionStorage.removeItem(TOKEN_KEY);
+    stopTimer();
+    $("login").style.display = "";
+    $("logout").style.display = "none";
+    $("statusCard").style.display = "none";
+    $("jobsCard").style.display = "none";
+    $("docsCard").style.display = "none";
+    $("conn").textContent = "sin conectar";
+    $("conn").className = "tag";
+    showBanner("");
+  }
+
+  function startTimer(){
+    stopTimer();
+    if($("auto").checked){
+      timer = setInterval(refresh, 3000);
+    }
+  }
+  function stopTimer(){ if(timer){ clearInterval(timer); timer = null; } }
+
+  function stat(k, v, cls){
+    var d = document.createElement("div");
+    d.className = "stat";
+    var kk = document.createElement("div"); kk.className = "k"; kk.textContent = k;
+    var vv = document.createElement("div"); vv.className = "v" + (cls ? " " + cls : "");
+    vv.textContent = v;
+    d.appendChild(kk); d.appendChild(vv);
+    return d;
+  }
+
+  function renderStatus(s){
+    var stats = $("stats");
+    stats.textContent = "";
+    var online = s.online ? "online" : "offline";
+    stats.appendChild(stat("Impresora", online, s.online ? "ok" : "bad"));
+    stats.appendChild(stat("Cola", s.queue_depth));
+    stats.appendChild(stat("Documento abierto", s.document_open ? (s.document_owner || "sí") : "no",
+      s.document_open ? "warn" : "ok"));
+    stats.appendChild(stat("Documentos", s.documents_issued));
+    stats.appendChild(stat("Errores", s.commands_failed, s.commands_failed ? "bad" : ""));
+    stats.appendChild(stat("Duplicados", s.duplicates_detected, s.duplicates_detected ? "bad" : ""));
+    stats.appendChild(stat("Última factura", s.last_invoice_number));
+    stats.appendChild(stat("Latencia media", Math.round(s.avg_latency_ms || 0) + " ms"));
+
+    var blocked = $("blocked");
+    if(s.blocked){
+      blocked.textContent = "Emisión bloqueada: " + (s.blocked_reason || "motivo desconocido");
+      blocked.className = "bad";
+    } else {
+      blocked.textContent = "Emisión habilitada.";
+      blocked.className = "muted";
+    }
+    var conn = $("conn");
+    conn.textContent = s.online ? "impresora online" : "impresora offline";
+    conn.className = "tag " + (s.online ? "ok" : "bad");
+  }
+
+  function td(text, cls){
+    var c = document.createElement("td");
+    if(cls){ c.className = cls; }
+    c.textContent = text == null ? "" : String(text);
+    return c;
+  }
+
+  function jobActions(job){
+    var c = document.createElement("td");
+    c.className = "right nowrap";
+    var canCancel = job.status === "queued" || job.status === "paused";
+    var canRetry = (job.status === "queued" || job.status === "paused") && job.cursor === 0;
+    if(canCancel){
+      var b = document.createElement("button");
+      b.className = "danger";
+      b.textContent = "Cancelar";
+      b.onclick = function(){
+        if(!confirm("¿Cancelar el trabajo " + job.job_id + "? No se imprimirá.")){ return; }
+        act(job.job_id, "cancel", b);
+      };
+      c.appendChild(b);
+    }
+    if(canRetry){
+      var r = document.createElement("button");
+      r.textContent = "Reintentar";
+      r.style.marginLeft = "6px";
+      r.onclick = function(){
+        if(!confirm("¿Reencolar el trabajo " + job.job_id + "?")){ return; }
+        act(job.job_id, "retry", r);
+      };
+      c.appendChild(r);
+    }
+    if(!canCancel && !canRetry){ c.textContent = "—"; c.className += " muted"; }
+    return c;
+  }
+
+  function act(id, action, btn){
+    if(btn){ btn.disabled = true; }
+    showBanner("");
+    api("/v1/jobs/" + encodeURIComponent(id) + "/" + action, {method:"POST"})
+      .then(function(){
+        showBanner("Trabajo " + id + ": " + action + " OK", "info");
+        refresh();
+      })
+      .catch(function(err){
+        if(btn){ btn.disabled = false; }
+        if(err.unauthorized){ logout(); showBanner("El token ya no es válido."); return; }
+        showBanner("No se pudo " + action + " " + id + ": " + err.message);
+      });
+  }
+
+  function renderJobs(jobs){
+    var body = $("jobs");
+    body.textContent = "";
+    $("jobsEmpty").style.display = jobs.length ? "none" : "";
+    jobs.forEach(function(j){
+      var tr = document.createElement("tr");
+      tr.appendChild(td(j.job_id, "mono"));
+      tr.appendChild(td(j.station));
+      tr.appendChild(td(j.status));
+      tr.appendChild(td(j.cursor + "/" + j.lines));
+      tr.appendChild(td(new Date(j.created_at).toLocaleString()));
+      tr.appendChild(td(j.last_error || "", j.last_error ? "bad" : "muted"));
+      tr.appendChild(jobActions(j));
+      body.appendChild(tr);
+    });
+  }
+
+  function renderDocs(docs){
+    var body = $("docs");
+    body.textContent = "";
+    docs.forEach(function(d){
+      var tr = document.createElement("tr");
+      tr.appendChild(td(d.sequence, "mono"));
+      tr.appendChild(td(d.type));
+      tr.appendChild(td(d.number, "mono"));
+      tr.appendChild(td(d.station));
+      tr.appendChild(td(new Date(d.issued_at).toLocaleString()));
+      tr.appendChild(td(d.client_ref || "", "muted"));
+      body.appendChild(tr);
+    });
+  }
+
+  function refresh(){
+    if(busy || !token){ return; }
+    busy = true;
+    var filter = $("filter").value;
+    var jobsURL = "/v1/jobs?limit=50" + (filter ? "&status=" + encodeURIComponent(filter) : "");
+    Promise.all([
+      api("/v1/status"),
+      api(jobsURL),
+      api("/v1/documents?limit=20")
+    ]).then(function(res){
+      renderStatus(res[0]);
+      renderJobs(res[1].jobs || []);
+      renderDocs(res[2].documents || []);
+    }).catch(function(err){
+      if(err.unauthorized){ logout(); showBanner("Token rechazado. Vuelva a conectar."); return; }
+      showBanner("No se pudo consultar el servidor: " + err.message);
+    }).then(function(){ busy = false; });
+  }
+
+  $("connect").onclick = connect;
+  $("token").addEventListener("keydown", function(e){ if(e.key === "Enter"){ connect(); } });
+  $("logout").onclick = logout;
+  $("refresh").onclick = refresh;
+  $("filter").onchange = refresh;
+  $("auto").onchange = startTimer;
+
+  // Sesión ya iniciada en esta pestaña.
+  if(token){
+    $("login").style.display = "none";
+    $("logout").style.display = "";
+    $("statusCard").style.display = "";
+    $("jobsCard").style.display = "";
+    $("docsCard").style.display = "";
+    refresh();
+    startTimer();
+  }
+})();
+</script>
+</body>
+</html>

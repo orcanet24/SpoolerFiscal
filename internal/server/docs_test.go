@@ -54,6 +54,32 @@ func TestHTTPDocsServesDiccionario(t *testing.T) {
 	}
 }
 
+func TestHTTPAdminPanel(t *testing.T) {
+	srv, _, _, _ := testAPI(t, HTTPConfig{})
+	for _, path := range []string{"/admin", "/admin/"} {
+		resp, body := httpDo(t, srv, http.MethodGet, path, "", nil, nil)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("%s estado = %d", path, resp.StatusCode)
+		}
+		if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
+			t.Fatalf("%s Content-Type = %q", path, ct)
+		}
+		text := string(body)
+		for _, want := range []string{
+			"Spooler Fiscal", "Cancelar", "Reintentar", "/v1/jobs/",
+			"sessionStorage", "documents?limit=",
+		} {
+			if !strings.Contains(text, want) {
+				t.Fatalf("el panel no contiene %q", want)
+			}
+		}
+		// La página es pública: no debe incluir el token.
+		if strings.Contains(text, "tok-rest") {
+			t.Fatal("el panel no debe incluir el token")
+		}
+	}
+}
+
 func TestHTTPDocsServesOpenAPI(t *testing.T) {
 	srv, _, _, _ := testAPI(t, HTTPConfig{})
 	resp, body := httpDo(t, srv, http.MethodGet, "/docs/openapi.yaml", "", nil, nil)

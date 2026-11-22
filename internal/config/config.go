@@ -11,6 +11,8 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+
+	"spoolerfiscal/internal/fiscal"
 )
 
 // Logging describe el destino y la rotación de logs.
@@ -147,18 +149,62 @@ type HTTP struct {
 
 // Server es la configuración completa del servicio central.
 type Server struct {
-	Token           string     `yaml:"token"`
-	TLS             TLS        `yaml:"tls"`
-	AllowedStations []string   `yaml:"allowed_stations"`
-	Printer         PrinterCfg `yaml:"printer"`
-	Queue           Queue      `yaml:"queue"`
-	Guard           Guard      `yaml:"guard"`
-	Database        Database   `yaml:"database"`
-	Logging         Logging    `yaml:"logging"`
-	Metrics         Metrics    `yaml:"metrics"`
-	HTTP            HTTP       `yaml:"http"`
-	ConfigPath      string     `yaml:"-"`
-	ServiceName     string     `yaml:"-"`
+	Token string `yaml:"token"`
+	// StationTokens ata una estación a su propio token. Si una estación tiene
+	// token propio, el token compartido deja de representarla: sólo su token
+	// puede emitir en su nombre. Vacío = todas usan el token compartido.
+	StationTokens   map[string]string `yaml:"station_tokens"`
+	TLS             TLS               `yaml:"tls"`
+	AllowedStations []string          `yaml:"allowed_stations"`
+	Printer         PrinterCfg        `yaml:"printer"`
+	Queue           Queue             `yaml:"queue"`
+	Guard           Guard             `yaml:"guard"`
+	Database        Database          `yaml:"database"`
+	Logging         Logging           `yaml:"logging"`
+	Metrics         Metrics           `yaml:"metrics"`
+	HTTP            HTTP              `yaml:"http"`
+	ConfigPath      string            `yaml:"-"`
+	ServiceName     string            `yaml:"-"`
+}
+
+// ValidStationID indica si un identificador de estación es aceptable: entre 1
+// y 64 caracteres, letras, números y - _ . :
+func ValidStationID(s string) bool {
+	if len(s) == 0 || len(s) > 64 {
+		return false
+	}
+	for _, c := range s {
+		ok := c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' ||
+			c == '-' || c == '_' || c == '.' || c == ':'
+		if !ok {
+			return false
+		}
+	}
+	return true
+}
+
+// validateStationTokens revisa los tokens por estación: identificador válido,
+// token no vacío, sin repetir token (dos estaciones con el mismo token serían
+// indistinguibles) y distinto del token compartido.
+func validateStationTokens(s Server) error {
+	seen := make(map[string]string, len(s.StationTokens))
+	for station, token := range s.StationTokens {
+		if !ValidStationID(station) {
+			return fmt.Errorf("station_tokens: identificador de estación %q inválido", station)
+		}
+		tok := strings.TrimSpace(token)
+		if tok == "" {
+			return fmt.Errorf("station_tokens[%s]: el token no puede estar vacío", station)
+		}
+		if s.Token != "" && tok == s.Token {
+			return fmt.Errorf("station_tokens[%s]: no puede usar el token compartido", station)
+		}
+		if prev, dup := seen[tok]; dup {
+			return fmt.Errorf("station_tokens[%s]: comparte token con la estación %q", station, prev)
+		}
+		seen[tok] = station
+	}
+	return nil
 }
 
 func defaultsLogging(file string) Logging {
@@ -205,10 +251,10 @@ func DefaultServer() Server {
 		},
 		Queue: Queue{
 			MaxPending: 256, DefaultTimeoutMS: 30000, MaxTimeoutMS: 120000, ProbeTimeoutMS: 5000,
-			DocumentLockTimeoutMS:   120000,
-			CorrelativeSyncMaxAgeMS: 10000,
+			DocumentLockTimeoutMS:      120000,
+			CorrelativeSyncMaxAgeMS:    10000,
 			StatusProbeIntervalSeconds: 15,
-			AutoCloseOpenDocument:   boolPtr(true),
+			AutoCloseOpenDocument:      boolPtr(true),
 		},
 		Guard: Guard{
 			BlockOnPaperOut: true, BlockOnMemoryFull: true, BlockOnError: true,
@@ -309,6 +355,9 @@ func (a Agent) Validate() error {
 	if _, err := ParsePort(a.VirtualCOM); err != nil {
 		errs = append(errs, "virtual_com: "+err.Error())
 	}
+	if t := a.Server.TLS; t.Enabled && (t.CertFile == "") != (t.KeyFile == "") {
+		errs = append(errs, "server.tls.cert_file y server.tls.key_file deben configurarse juntos (mTLS)")
+	}
 	if len(errs) > 0 {
 		return errors.New("configuración del agente inválida:\n  - " + strings.Join(errs, "\n  - "))
 	}
@@ -321,6 +370,9 @@ func (s Server) Validate() error {
 	if strings.TrimSpace(s.Token) == "" {
 		errs = append(errs, "token es obligatorio (token compartido); puede venir de SPOOLER_TOKEN")
 	}
+	if err := validateStationTokens(s); err != nil {
+		errs = append(errs, err.Error())
+	}
 	if strings.TrimSpace(s.Database.Path) == "" {
 		errs = append(errs, "database.path es obligatorio")
 	}
@@ -332,10 +384,11 @@ func (s Server) Validate() error {
 	if a := s.TLS; a.Enabled && a.CAFile != "" && (a.CertFile == "" || a.KeyFile == "") {
 		errs = append(errs, "tls.ca_file (mTLS) requiere tls.cert_file y tls.key_file")
 	}
-	switch strings.ToLower(s.Printer.Driver) {
-	case "tfhka":
+	switch strings.ToLower(strings.TrimSpace(s.Printer.Driver)) {
+	case fiscal.BrandTFHKA, fiscal.BrandHasar, fiscal.BrandBixolon, fiscal.BrandEpson, "":
 	default:
-		errs = append(errs, fmt.Sprintf("printer.driver %q no soportado (soportado: tfhka)", s.Printer.Driver))
+		errs = append(errs, fmt.Sprintf("printer.driver %q no soportado (soportados: %s)",
+			s.Printer.Driver, strings.Join(fiscal.Drivers(), ", ")))
 	}
 	switch strings.ToLower(s.Printer.Transport) {
 	case "serial":

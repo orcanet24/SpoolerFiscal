@@ -205,8 +205,9 @@ paths:
       tags: [emisión]
       summary: Emite una factura desde ítems y totales en JSON
       description: |
-        Compila los ítems a líneas TFHKA (alícuota general 16 %, reducida 8 %,
-        adicional 30 % o exenta), añade el cierre `101` y ejecuta la factura con
+        Compila la factura a líneas TFHKA (alícuota general 16 %, reducida 8 %,
+        adicional 30 % o exenta) en el orden canónico: datos del cliente,
+        ítems, subtotal, descuento/recargo, pagos y cierre `101`. Ejecuta con
         la misma ruta atómica e idempotente que `/v1/invoices`.
 
         Los `unit_price` se interpretan **con IVA incluido**, como los maneja la
@@ -214,8 +215,8 @@ paths:
         centavo) y una discrepancia responde 400 `totals_mismatch`: así no se
         imprime una factura con totales incoherentes.
 
-        No envía datos de cliente ni formas de pago; para eso use
-        `/v1/commands` con los comandos del protocolo.
+        Sólo emite TFHKA. Con otro driver responde `501
+        structured_not_supported`: envíe las líneas nativas por `/v1/invoices`.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
         - $ref: "#/components/parameters/AsyncMode"
@@ -248,6 +249,10 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "409": {$ref: "#/components/responses/Conflict"}
         "429": {$ref: "#/components/responses/QueueFull"}
+        "501":
+          description: |
+            El driver activo no es TFHKA; el compilador structured sólo emite
+            ese protocolo (`code: structured_not_supported`).
         "502": {$ref: "#/components/responses/InvoiceAborted"}
         "503": {$ref: "#/components/responses/PrinterUnavailable"}
         "504": {$ref: "#/components/responses/Timeout"}
@@ -306,12 +311,73 @@ paths:
               schema: {$ref: "#/components/schemas/JobDetail"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "404": {$ref: "#/components/responses/NotFound"}
+  /v1/jobs/{id}/cancel:
+    post:
+      tags: [trabajos]
+      summary: Cancela un trabajo que todavía no llegó a papel
+      description: |
+        Sólo se puede cancelar un trabajo `queued` o `paused` con avance cero
+        (ninguna línea impresa). Una factura que ya empezó a imprimirse no se
+        cancela: exige revisión del operador (`409 job_not_cancelable`).
+        Al cancelar se libera la `Idempotency-Key`, de modo que el mismo pedido
+        puede re-emitirse sin quedar bloqueado por un trabajo que nunca se
+        imprimió.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string}
+          example: job_9af1c2ab34de
+      responses:
+        "200":
+          description: Trabajo cancelado
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/JobDetail"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409":
+          description: |
+            El trabajo ya no se cancela porque está en curso o ya se imprimió
+            (`code: job_not_cancelable`).
+  /v1/jobs/{id}/retry:
+    post:
+      tags: [trabajos]
+      summary: Reencola un trabajo que no llegó a papel
+      description: |
+        Vuelve a encolar un trabajo `queued` o `paused` con avance cero; el
+        despachador lo ejecuta en el siguiente ciclo (consulte el estado en
+        `GET /v1/jobs/{id}`). Un trabajo con líneas ya impresas no se
+        reintenta (`409 job_not_retryable`): re-someter la factura completa es
+        una decisión de negocio, no un reintento técnico.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string}
+          example: job_9af1c2ab34de
+      responses:
+        "202":
+          description: Trabajo reencolado
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/JobAccepted"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409":
+          description: |
+            El trabajo no se puede reintentar porque ya imprimió líneas o está
+            en un estado final (`code: job_not_retryable`).
 components:
   securitySchemes:
     bearerAuth:
       type: http
       scheme: bearer
-      description: Token compartido del spooler (`token` del server.yaml o `SPOOLER_TOKEN`).
+      description: |
+        Token compartido del spooler (`token` del server.yaml o
+        `SPOOLER_TOKEN`) o token de una estación (`station_tokens`). Un token
+        de estación sólo puede emitir en su propia estación; el compartido no
+        representa a una estación que tenga token propio.
   parameters:
     IdempotencyKey:
       name: Idempotency-Key
@@ -531,13 +597,59 @@ components:
         station: {type: string, maxLength: 64, example: ECOM-01}
         client_ref: {type: string, example: pedido-1001}
         timeout_ms: {type: integer, minimum: 0}
+        customer:
+          $ref: "#/components/schemas/InvoiceCustomer"
         items:
           type: array
           minItems: 1
           maxItems: 500
           items: {$ref: "#/components/schemas/InvoiceItem"}
+        discount:
+          type: number
+          minimum: 0
+          description: Descuento global (700<monto>). No puede exceder el total.
+          example: 10
+        surcharge:
+          type: number
+          minimum: 0
+          description: Recargo global (701<monto>).
+          example: 5
+        payments:
+          type: array
+          description: |
+            Formas de pago. Si vienen, se imprime el subtotal (3) y se valida
+            que cubran el total neto antes de imprimir.
+          items: {$ref: "#/components/schemas/InvoicePayment"}
         totals:
           $ref: "#/components/schemas/InvoiceTotals"
+    InvoiceCustomer:
+      type: object
+      additionalProperties: false
+      description: |
+        Datos del cliente (iR*/iS*/i01/i02). Todos opcionales; los vacíos se
+        omiten. ASCII imprimible, sin `|` ni saltos de línea.
+      properties:
+        rif: {type: string, maxLength: 20, example: J-12345678-9}
+        name: {type: string, maxLength: 40, example: CLIENTE C.A.}
+        address: {type: string, maxLength: 80, example: Av. Principal, Caracas}
+        phone: {type: string, maxLength: 20, example: 0212-1234567}
+    InvoicePayment:
+      type: object
+      additionalProperties: false
+      required: [amount]
+      properties:
+        method:
+          type: string
+          maxLength: 20
+          description: |
+            Medio de pago. `cash` (omisión) no declara 103; otro texto se envía
+            como `103<medio>` antes del `100<monto>`.
+          example: tarjeta
+        amount:
+          type: number
+          exclusiveMinimum: 0
+          maximum: 9999999.99
+          example: 126.5
     InvoiceItem:
       type: object
       additionalProperties: false
@@ -571,10 +683,14 @@ components:
       properties:
         subtotal: {type: number, example: 17.88}
         tax: {type: number, example: 2.12}
+        discount: {type: number, example: 10}
+        surcharge: {type: number, example: 5}
         total: {type: number, example: 20}
       description: |
-        Opcional. Si se envía, `total` es obligatorio y se compara con el
-        calculado; `subtotal` y `tax` se comparan sólo si son mayores que cero.
+        Opcional en la petición. Si se envía, `total` es obligatorio y se
+        compara con el calculado; `subtotal` y `tax` se comparan sólo si son
+        mayores que cero y no hay descuento ni recargo. En la respuesta,
+        `subtotal`/`tax` son los del bruto de los ítems y `total` es el neto.
     StructuredInvoiceResponse:
       allOf:
         - $ref: "#/components/schemas/InvoiceResponse"
