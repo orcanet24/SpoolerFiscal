@@ -561,24 +561,24 @@ function Install-AgentRole {
         $AgentPort = Read-Required "Puerto COM del agente (par com0com)" $AgentPort
         $ProfitPort = Read-Required "Puerto COM para Profit Plus (el otro del par)" $ProfitPort
 
-        $setupc = Find-Com0com
         if (-not $SkipCom0com) {
-            if ($setupc) {
-                $create = if ($script:Silent) { $false } else {
-                    Read-YesNo "¿Crear el par com0com $ProfitPort <-> $AgentPort ahora?" $true
-                }
-                if ($create) {
-                    Write-Host "   Creando par com0com $ProfitPort <-> $AgentPort ..."
-                    & $setupc install "PortName=$ProfitPort" "PortName=$AgentPort" | Out-Null
+            $create = if ($script:Silent) { $true } else {
+                Read-YesNo "¿Instalar/verificar com0com y crear par $ProfitPort <-> $AgentPort ahora?" $true
+            }
+            if ($create) {
+                Write-Host "   Instalando com0com y creando par $ProfitPort <-> $AgentPort ..."
+                # Usar el agente para instalar com0com (descarga auto si falta)
+                $agentExe = Join-Path $script:TargetDir "agent.exe"
+                if (Test-Path -LiteralPath $agentExe) {
+                    & $agentExe -install-com0com -profit-port $ProfitPort -agent-port $AgentPort
                     if ($LASTEXITCODE -ne 0) {
-                        Write-Warn "com0com devolvió $LASTEXITCODE (puede que el par ya exista). Verifique con: `"$setupc`" list"
+                        Write-Warn "El agente reportó error al instalar com0com. Revise permisos de admin."
                     } else {
-                        Write-Ok "Par com0com creado: Profit Plus en $ProfitPort, agente en $AgentPort."
+                        Write-Ok "com0com instalado/verificado y par COM creado: Profit Plus en $ProfitPort, agente en $AgentPort."
                     }
+                } else {
+                    Write-Warn "agent.exe no encontrado en $script:TargetDir. Se omitió instalación de com0com."
                 }
-            } else {
-                Write-Warn "com0com no está instalado. El agente esperará el puerto $AgentPort."
-                Write-Warn "Instálelo desde https://sourceforge.net/projects/com0com/ y cree el par $ProfitPort <-> $AgentPort."
             }
         }
 

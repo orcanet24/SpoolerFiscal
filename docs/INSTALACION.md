@@ -81,7 +81,26 @@ go build -o bin\agent.exe   .\cmd\agent
 
 ## 3. Estación (PC con Profit Plus)
 
-### 3.1 Crear el par de puertos virtuales
+### 3.1 Crear el par de puertos virtuales (OPCIÓN AUTOMÁTICA RECOMENDADA)
+
+**Desde el binario del agente (descarga e instala com0com solo si falta):**
+
+```powershell
+# Como administrador:
+.\bin\agent.exe -install-com0com -profit-port COM3 -agent-port COM4
+```
+
+O si ya configuró `configs\agent.yaml` con `virtual_com.name: COM4`:
+
+```powershell
+.\bin\agent.exe -install-com0com
+```
+
+> Requiere PowerShell/CMD **como Administrador**. El agente descarga el instalador oficial de com0com de GitHub, lo instala silenciosamente y crea el par COM virtual en el kernel.
+
+---
+
+**Opción manual (si prefiere control total):**
 
 1. Instale com0com (driver firmado, gratuito): <https://sourceforge.net/projects/com0com/>.
 2. Créelo con el script incluido, en PowerShell **como administrador**:

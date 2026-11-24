@@ -145,6 +145,8 @@ type HTTP struct {
 	// Frecuencia del despachador que reanuda trabajos pausados y ejecuta los
 	// asíncronos de la cola duradera. 0 = 10 segundos.
 	JobResumeIntervalSeconds int `yaml:"job_resume_interval_seconds"`
+	// Habilita/deshabilita el servidor HTTP (compatibilidad con configs legacy)
+	Enabled *bool `yaml:"enabled"`
 }
 
 // Server es la configuración completa del servicio central.
@@ -163,6 +165,10 @@ type Server struct {
 	Logging         Logging           `yaml:"logging"`
 	Metrics         Metrics           `yaml:"metrics"`
 	HTTP            HTTP              `yaml:"http"`
+	// Listen en raíz (legacy/compat): si se usa, tiene prioridad sobre http.listen
+	Listen string `yaml:"listen"`
+	// SessionTTLMinutes: TTL de sesión en minutos (legacy/compat)
+	SessionTTLMinutes int `yaml:"session_ttl_minutes"`
 	ConfigPath      string            `yaml:"-"`
 	ServiceName     string            `yaml:"-"`
 }
