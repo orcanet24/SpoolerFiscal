@@ -48,9 +48,14 @@ set "GOOS=windows"
 set "GOARCH=amd64"
 set "CGO_ENABLED=0"
 
-echo Compilando cliente...
+echo Compilando agente (cliente.exe + agent.exe)...
 pushd "%ROOT%"
-go build -trimpath -ldflags "-s -w" -o "%CLIENTE%\cliente.exe" .\cmd\agent
+go build -trimpath -ldflags "-s -w" -o "%CLIENTE%\agent.exe" .\cmd\agent
+if errorlevel 1 (
+    popd
+    goto :error
+)
+copy /Y "%CLIENTE%\agent.exe" "%CLIENTE%\cliente.exe" >nul
 if errorlevel 1 (
     popd
     goto :error
@@ -80,7 +85,8 @@ popd
 
 echo.
 echo Compilacion completada:
-echo   Cliente:  %CLIENTE%\cliente.exe
+echo   Agente:   %CLIENTE%\agent.exe    (principal, para -install-com0com)
+echo   Alias:    %CLIENTE%\cliente.exe  (compatibilidad legacy)
 echo   Config:   %CLIENTE%\configs\agent.yaml
 echo   Entorno:  %CLIENTE%\.env
 echo   Servidor: %SERVER%\server.exe
