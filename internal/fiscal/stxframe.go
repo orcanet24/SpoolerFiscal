@@ -69,17 +69,50 @@ type tfhkaFramer struct {
 
 func newTFHKAFramer(s frame.Stream) frame.Stream { return &tfhkaFramer{stream: s} }
 
+// isTFHKAControlOnly indica si el payload está hecho sólo de bytes de control
+// que el protocolo HKA intercambia fuera de la trama STX/ETX/LRC: ENQ (0x05),
+// ACK (0x06), NAK (0x15) y control de flujo por software XON (0x11) / XOFF
+// (0x13). Estos bytes no se envuelven; ver tfhkaFramer.Write.
+func isTFHKAControlOnly(b []byte) bool {
+	if len(b) == 0 {
+		return false
+	}
+	for _, c := range b {
+		switch c {
+		case 0x05, 0x06, 0x15, 0x11, 0x13:
+		default:
+			return false
+		}
+	}
+	return true
+}
+
 func (f *tfhkaFramer) Write(p []byte) (int, error) {
-	// Si el cliente ya habla el protocolo (la trama llega con STX, como cuando
-	// Profit Plus escribe en el COM virtual) se envía tal cual: el spooler no
-	// debe re-envolver lo que ya está enmarcado.
-	if bytes.IndexByte(p, tfhkaSTX) >= 0 {
-		if err := frame.Write(f.stream, bytes.TrimRight(p, "\r\n")); err != nil {
+	// El terminador que agrega normalizeCommand (CR/LF) no forma parte de la
+	// trama: se descarta aquí para no alterar ni el framing ni el handshake.
+	trimmed := bytes.TrimRight(p, "\r\n")
+	if len(trimmed) == 0 {
+		return len(p), nil
+	}
+	// ENQ/ACK/NAK/XON/XOFF viajan sueltos. El SDK de The Factory (Profit Plus y
+	// el demo) los intercambia fuera de STX/ETX/LRC; envolverlos hace que la
+	// impresora conteste NAK (0x15) y el cliente lo reporte como "No Answer".
+	if isTFHKAControlOnly(trimmed) {
+		if err := frame.Write(f.stream, trimmed); err != nil {
 			return 0, err
 		}
 		return len(p), nil
 	}
-	text := strings.ReplaceAll(string(p), "\r\n", "\n")
+	// Si el cliente ya habla el protocolo (la trama llega con STX, como cuando
+	// Profit Plus escribe en el COM virtual) se envía tal cual: el spooler no
+	// debe re-envolver lo que ya está enmarcado.
+	if bytes.IndexByte(trimmed, tfhkaSTX) >= 0 {
+		if err := frame.Write(f.stream, trimmed); err != nil {
+			return 0, err
+		}
+		return len(p), nil
+	}
+	text := strings.ReplaceAll(string(trimmed), "\r\n", "\n")
 	lines := strings.Split(text, "\n")
 	sent := false
 	for _, line := range lines {
