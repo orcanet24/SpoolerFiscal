@@ -191,6 +191,8 @@ func (a *HTTPAPI) handlePrinter(w http.ResponseWriter, r *http.Request) {
 		"last_invoice_number":    info.LastInvoice,
 		"last_credit_note":       info.LastCredit,
 		"last_debit_note":        info.LastDebit,
+		"last_non_fiscal_doc":    info.LastNonFiscal,
+		"last_z_number":          info.LastZ,
 	})
 }
 
@@ -451,7 +453,10 @@ func (a *HTTPAPI) spoolerError(err error) (int, string) {
 
 // responseText devuelve la respuesta como texto sólo si es UTF-8 válido. El
 // agente usa response_base64, que preserva los bytes fiscales íntegros.
+// Para el consumo humano (curl, paneles) se descarta la envoltura STX/ETX/LRC
+// de TFHKA: los bytes exactos siguen disponibles en response_base64.
 func responseText(b []byte) string {
+	b = fiscal.UnframeSTX(b)
 	if utf8.Valid(b) {
 		return string(b)
 	}
@@ -703,7 +708,7 @@ func (a *HTTPAPI) runJobLines(ctx context.Context, job *PrintJob) jobOutcome {
 			return a.jobFailure(ctx, job, i, err, out)
 		}
 		out.Lines = append(out.Lines, lineJSON{
-			Index: i, Response: string(res.Response), Sequence: res.Sequence,
+			Index: i, Response: responseText(res.Response), Sequence: res.Sequence,
 			QueueWaitMS: res.QueueWait.Milliseconds(), LatencyMS: res.Latency.Milliseconds(),
 		})
 		if res.Document != nil {

@@ -1,20 +1,26 @@
-# Protocolo fiscal soportado: TFHKA (The Factory HKA), ASCII
+# Protocolo fiscal soportado: TFHKA (The Factory HKA), ASCII + STX/ETX/LRC
 
-Implementación: `internal/fiscal/tfhka.go`. El agente **no** interpreta nada de
-esto: transporta bytes. Toda la interpretación ocurre en el servidor, junto a la
-impresora.
+Implementación: `internal/fiscal/tfhka.go` + `internal/fiscal/stxframe.go`. El agente
+**no** interpreta nada de esto: transporta bytes. Toda la interpretación ocurre en el
+servidor, junto a la impresora.
 
-## 1. Transporte y framing
+## 1. Transporte y framing (REAL, confirmado contra HKA80)
 
 - Serie: 9600 8N1 (o 115200 8N1), sin control de flujo. Parámetros en
   `printer.port`.
-- Comando: texto ASCII terminado en `CR+LF` (`0x0D 0x0A`), configurable en
-  `printer.command_terminator`. **Con `CR` solo la TFHKA no responde** (probado
-  contra el simulador de referencia); use `"\r\n"`.
-- Respuesta: texto ASCII terminado en `CR`/`LF`.
-- **Delimitación por silencio:** una trama termina cuando el emisor deja de enviar
-  durante `read_gap_ms` (30 ms por omisión). No se recorta ni se normaliza nada:
-  los bytes viajan íntegros en ambos sentidos.
+- **Framing obligatorio**: cada comando viaja envuelto en
+  `STX (0x02) + comando + ETX (0x03) + LRC`.
+  - `LRC = XOR(comando + ETX)` (el STX no entra en el cálculo).
+  - La impresora **no responde** a texto plano (`S1\r\n` → NAK 0x15 o silencio).
+  - El driver `tfhka` añade la envoltura automáticamente; si el cliente (Profit
+    Plus vía COM virtual) ya envía tramas con STX, el driver las reenvía tal cual
+    sin re-envolver.
+- Respuesta: la impresora contesta con la misma envoltura
+  `STX + datos + ETX + LRC`, o un byte `NAK (0x15)` si rechaza el comando.
+- **Delimitación por silencio**: una trama termina cuando el emisor deja de enviar
+  durante `read_gap_ms` (100 ms en producción). El driver descarta STX/ETX/LRC
+  antes de interpretar (S1, S5, Describe), pero **el agente recibe los bytes
+  íntegros** (incluyendo la envoltura) vía `response_base64`.
 
 ## 2. Comandos usados
 

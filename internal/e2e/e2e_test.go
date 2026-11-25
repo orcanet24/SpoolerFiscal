@@ -25,6 +25,7 @@ import (
 	"spoolerfiscal/internal/agent"
 	"spoolerfiscal/internal/comvirt"
 	"spoolerfiscal/internal/config"
+	"spoolerfiscal/internal/fiscal"
 	"spoolerfiscal/internal/frame"
 	"spoolerfiscal/internal/server"
 	"spoolerfiscal/internal/testutil"
@@ -167,7 +168,7 @@ func emitInvoiceErr(host frame.Stream) ([]byte, error) {
 }
 
 func invoiceNumber(resp []byte) (int64, error) {
-	parts := strings.Split(string(resp), "|")
+	parts := strings.Split(string(fiscal.UnframeSTX(resp)), "|")
 	if len(parts) < 2 {
 		return 0, fmt.Errorf("respuesta inesperada %q", resp)
 	}
@@ -193,8 +194,9 @@ func TestEndToEndInvoice(t *testing.T) {
 	host := startAgent(t, ctx, h.rt.Addr(), "CAJA-01")
 
 	resp := emitInvoice(t, host)
-	if string(resp) != "0|Factura 1|Total: 116.00|Impreso:1\r\n" {
-		t.Fatalf("respuesta = %q", resp)
+	want := string(fiscal.FrameSTX([]byte("0|Factura 1|Total: 116.00|Impreso:1")))
+	if string(resp) != want {
+		t.Fatalf("respuesta = %q, se esperaba %q", resp, want)
 	}
 	if got := sim.InvoiceCount(); got != 1 {
 		t.Fatalf("facturas en la impresora = %d", got)
@@ -204,7 +206,7 @@ func TestEndToEndInvoice(t *testing.T) {
 	if err := frame.Write(host, []byte("S2\r\n")); err != nil {
 		t.Fatalf("enviar S2: %v", err)
 	}
-	if resp := readFrame(t, host); !strings.Contains(string(resp), "0|0|1|") {
+	if resp := readFrame(t, host); !strings.HasPrefix(string(fiscal.UnframeSTX(resp)), "S2") {
 		t.Fatalf("respuesta de estado = %q", resp)
 	}
 }

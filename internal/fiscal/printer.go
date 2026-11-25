@@ -70,6 +70,8 @@ type Info struct {
 	LastInvoice   int64
 	LastCredit    int64
 	LastDebit     int64
+	LastNonFiscal int64
+	LastZ         int64
 }
 
 // Description es la interpretación de una respuesta del protocolo. El
