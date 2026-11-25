@@ -50,11 +50,15 @@ func newTFHKA(opts Options) *TFHKA {
 // Driver identifica la implementación.
 func (p *TFHKA) Driver() string { return BrandTFHKA }
 
+// CloseDocumentCommand implementa DocumentCloser: en TFHKA el cierre
+// totalizador de recuperación es 101.
+func (p *TFHKA) CloseDocumentCommand() []byte { return []byte("101") }
+
 // Step clasifica el comando según el protocolo TFHKA: la primera línea de ítem
 // abre la factura (prefijo de alícuota), 101/81 la cierran y los documentos no
 // fiscales se abren con 80$ y se cierran con 81.
 func (p *TFHKA) Step(cmd []byte) Step {
-	raw := strings.TrimRight(string(cmd), "\r\n")
+	raw := strings.TrimRight(string(stripTFHKAFrame(cmd)), "\r\n")
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
 		return StepNeutral
@@ -71,6 +75,17 @@ func (p *TFHKA) Step(cmd []byte) Step {
 	switch trimmed[0] {
 	case 'S', 'U', '9':
 		return StepNeutral
+	}
+	// Datos del documento (cliente y referencias de nota). Se clasifican como
+	// apertura para que el turno exclusivo se tome desde la primera línea: el
+	// orden canónico de TFHKA manda el cliente antes de los ítems y, sin esto,
+	// otra estación podría intercalar su documento entre el cliente y el primer
+	// ítem.
+	if strings.HasPrefix(trimmed, "iR*") || strings.HasPrefix(trimmed, "iS*") ||
+		strings.HasPrefix(trimmed, "i01") || strings.HasPrefix(trimmed, "i02") ||
+		strings.HasPrefix(trimmed, "iF*") || strings.HasPrefix(trimmed, "iD*") ||
+		strings.HasPrefix(trimmed, "iI*") {
+		return StepOpenDocument
 	}
 	// El prefijo de alícuota es el primer carácter: espacio = exento.
 	switch raw[0] {
@@ -97,6 +112,9 @@ func (p *TFHKA) Open(ctx context.Context) error {
 		p.last.Checked = p.now()
 		return err
 	}
+	// TFHKA exige STX/ETX/LRC en cada comando; el resto del driver trabaja con
+	// texto plano y el framer se encarga de la envoltura.
+	tr = newTFHKAFramer(tr)
 	p.tr = tr
 	p.last.Online = true
 	p.last.LastError = ""
@@ -140,7 +158,10 @@ func (p *TFHKA) SendCommand(ctx context.Context, cmd []byte) error {
 	return nil
 }
 
-// ReadResponse lee una respuesta completa hasta el silencio del puerto.
+// ReadResponse lee una respuesta completa hasta el silencio del puerto. Los
+// bytes se devuelven tal cual llegaron: el agente los reenvía al COM virtual
+// de la estación y Profit Plus espera la trama original. La interpretación
+// (Describe, S1, S5) es la que descarta STX/ETX/LRC.
 func (p *TFHKA) ReadResponse(ctx context.Context) ([]byte, error) {
 	tr := p.transport()
 	if tr == nil {
@@ -266,7 +287,8 @@ func (p *TFHKA) GetCorrelative(ctx context.Context) (Info, error) {
 
 // Describe interpreta una respuesta sin modificarla.
 func (p *TFHKA) Describe(cmd, resp []byte) Description {
-	text := strings.TrimSpace(string(resp))
+	plain := stripTFHKAFrame(resp)
+	text := strings.TrimSpace(string(plain))
 	d := Description{}
 
 	p.mu.Lock()
@@ -276,6 +298,19 @@ func (p *TFHKA) Describe(cmd, resp []byte) Description {
 	st.Online = len(resp) > 0
 	st.Checked = p.now()
 	st.Raw = text
+
+	// NAK: la impresora recibió la trama pero rechazó el comando.
+	if len(plain) == 1 && plain[0] == tfhkaNAK {
+		st.LastError = "comando rechazado por la impresora (NAK)"
+		d.Failed = true
+		d.ErrorCode = tfhkaNAK
+		d.ErrorText = st.LastError
+		d.Status = st
+		p.mu.Lock()
+		p.last = st
+		p.mu.Unlock()
+		return d
+	}
 
 	hadStatus := false
 	if m := tfhkaStatusPrefixRe.FindStringSubmatch(text); m != nil {
@@ -356,42 +391,76 @@ func hexByte(s string) byte {
 	return byte(v)
 }
 
-// parseTFHKAS1 interpreta "0|maquina|rif|auditoria|corte|ultFact|ultNC|ultND|ultDNF|ventas|fecha".
+// parseTFHKAS1 interpreta la respuesta de S1. El formato real de la HKA es
+// texto con campos separados por LF, cada uno con ceros a la izquierda:
+//
+//	S100
+//	00000000000000000   (flags)
+//	00010850            última factura
+//	00000               ...
+//	00000000
+//	00000
+//	00000259            última nota de crédito
+//	00000               última nota de débito
+//	00000920            último documento no fiscal
+//	00001               documentos no fiscales del día
+//	0000
+//	0893                último cierre Z (contador de cortes)
+//	J-503895241         RIF
+//	Z7C7022079          serial de la máquina
+//	234331              hora actual (HHMMSS)
+//	241126              fecha actual (DDMMAA)
 func parseTFHKAS1(text string, info *Info) {
-	fields := strings.Split(strings.TrimSpace(text), "|")
-	if len(fields) > 0 && fields[0] == "0" {
-		fields = fields[1:]
-	}
-	if len(fields) >= 2 {
-		if info.Serial == "" {
-			info.Serial = fields[0]
-		}
+	fields := tfhkaLines(text, "S1")
+	if len(fields) >= 14 {
+		info.LastInvoice = atoi(fields[2])
+		info.LastCredit = atoi(fields[6])
+		info.LastDebit = atoi(fields[7])
+		info.LastNonFiscal = atoi(fields[8])
+		info.LastZ = atoi(fields[11])
 		if info.RIF == "" {
-			info.RIF = strings.ReplaceAll(fields[1], "*", "")
+			info.RIF = strings.ReplaceAll(fields[12], "*", "")
 		}
-	}
-	if len(fields) >= 7 {
-		info.LastInvoice = atoi(fields[4])
-		info.LastCredit = atoi(fields[5])
-		info.LastDebit = atoi(fields[6])
+		if info.Serial == "" {
+			info.Serial = strings.ReplaceAll(fields[13], "*", "")
+		}
 	}
 }
 
-// parseTFHKAS5 interpreta "maquina|rif|nroAuditoria|totalMB|libreMB|docs".
+// parseTFHKAS5 interpreta la respuesta de S5:
+//
+//	S5J-503895241   RIF
+//	Z7C7022079      serial
+//	0001            número de memoria de auditoría
+//	1908            capacidad total (KB)
+//	1384            capacidad libre (KB)
+//	012029          documentos registrados
 func parseTFHKAS5(text string, info *Info) {
-	fields := strings.Split(strings.TrimSpace(text), "|")
-	if len(fields) >= 2 {
-		if info.Serial == "" {
-			info.Serial = strings.ReplaceAll(fields[0], "*", "")
-		}
-		if info.RIF == "" {
-			info.RIF = strings.ReplaceAll(fields[1], "*", "")
-		}
-	}
+	fields := tfhkaLines(text, "S5")
 	if len(fields) >= 5 {
+		if info.RIF == "" {
+			info.RIF = strings.ReplaceAll(fields[0], "*", "")
+		}
+		if info.Serial == "" {
+			info.Serial = strings.ReplaceAll(fields[1], "*", "")
+		}
 		info.MemoryTotalMB = atof(fields[3])
 		info.MemoryFreeMB = atof(fields[4])
 	}
+}
+
+// tfhkaLines parte una respuesta en líneas ya normalizadas. El prefijo del
+// comando ("S1", "S5") viaja pegado al primer campo y se descarta.
+func tfhkaLines(text, prefix string) []string {
+	text = string(stripTFHKAFrame([]byte(text)))
+	text = strings.TrimSpace(text)
+	text = strings.TrimPrefix(text, prefix)
+	lines := strings.Split(text, "\n")
+	out := make([]string, 0, len(lines))
+	for _, l := range lines {
+		out = append(out, strings.TrimSpace(strings.ReplaceAll(l, "\r", "")))
+	}
+	return out
 }
 
 func atoi(s string) int64 {

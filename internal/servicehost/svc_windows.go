@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"time"
 
 	"golang.org/x/sys/windows/svc"
@@ -63,13 +64,30 @@ func (h *handler) Execute(args []string, r <-chan svc.ChangeRequest, changes cha
 }
 
 func runService(app App, configPath string) error {
+	prepareServiceCWD()
 	return svc.Run(app.Name, &handler{app: app, configPath: configPath})
 }
 
 func runDebug(app App, configPath string) error {
+	prepareServiceCWD()
 	return debug.Run(app.Name, &handler{app: app, configPath: configPath})
 }
 
+// prepareServiceCWD fija el directorio de trabajo en el del ejecutable. El
+// Administrador de servicios de Windows arranca los procesos con CWD en
+// System32: sin esto, las rutas relativas de la configuración (data\spooler.db,
+// logs\server.log) acabarían dentro de C:\Windows\System32.
+func prepareServiceCWD() {
+	exe, err := os.Executable()
+	if err != nil {
+		return
+	}
+	_ = os.Chdir(filepath.Dir(exe))
+}
+
+// installService registra el servicio. Si ya existe (actualización de
+// binario), lo detiene, lo elimina y lo vuelve a crear: así el mismo comando
+// sirve para instalar y para actualizar. Al final lo arranca.
 func installService(app App, configPath string) error {
 	exe, err := os.Executable()
 	if err != nil {
@@ -81,20 +99,65 @@ func installService(app App, configPath string) error {
 	}
 	defer func() { _ = m.Disconnect() }()
 
-	if s, err := m.OpenService(app.Name); err == nil {
-		_ = s.Close()
-		return fmt.Errorf("el servicio %q ya existe; desinstálelo primero con -uninstall", app.Name)
+	// Servicio previo: detenerlo y borrarlo antes de recrearlo.
+	if old, err := m.OpenService(app.Name); err == nil {
+		_, _ = old.Control(svc.Stop)
+		deadline := time.Now().Add(15 * time.Second)
+		for time.Now().Before(deadline) {
+			st, qerr := old.Query()
+			if qerr != nil || st.State == svc.Stopped {
+				break
+			}
+			time.Sleep(300 * time.Millisecond)
+		}
+		if err := old.Delete(); err != nil {
+			_ = old.Close()
+			return fmt.Errorf("reemplazar el servicio existente: %w", err)
+		}
+		_ = old.Close()
+		// Windows marca el servicio como "pendiente de borrado" unos instantes.
+		time.Sleep(500 * time.Millisecond)
 	}
 
-	s, err := m.CreateService(app.Name, exe, mgr.Config{
-		DisplayName: app.DisplayName,
-		Description: app.Description,
-		StartType:   mgr.StartAutomatic,
-	}, "-config", configPath)
+	var s *mgr.Service
+	for attempt := 0; attempt < 10; attempt++ {
+		s, err = m.CreateService(app.Name, exe, mgr.Config{
+			DisplayName: app.DisplayName,
+			Description: app.Description,
+			StartType:   mgr.StartAutomatic,
+		}, "-config", configPath)
+		if err == nil {
+			break
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
 	if err != nil {
 		return fmt.Errorf("crear servicio: %w", err)
 	}
-	return s.Close()
+	defer func() { _ = s.Close() }()
+
+	// Reinicio automático ante caída: sin esto, un fallo del proceso deja el
+	// servicio detenido hasta que alguien lo arranque a mano.
+	actions := []mgr.RecoveryAction{
+		{Type: mgr.ServiceRestart, Delay: 5 * time.Second},
+		{Type: mgr.ServiceRestart, Delay: 10 * time.Second},
+		{Type: mgr.ServiceRestart, Delay: 30 * time.Second},
+	}
+	if err := s.SetRecoveryActions(actions, 86400); err != nil {
+		return fmt.Errorf("configurar reinicio ante fallos: %w", err)
+	}
+	// También reiniciar si el proceso termina con código distinto de cero
+	// (por ejemplo, una configuración inválida al arrancar).
+	_ = s.SetRecoveryActionsOnNonCrashFailures(true)
+
+	// Arrancarlo ya: el objetivo es que el servicio quede operativo de una vez.
+	if err := s.Start(); err != nil {
+		fmt.Printf("Aviso: el servicio quedó instalado pero no arrancó: %v\n", err)
+		fmt.Printf("Arránquelo con: sc start %s\n", app.Name)
+		return nil
+	}
+	fmt.Printf("Servicio %s arrancado.\n", app.Name)
+	return nil
 }
 
 func uninstallService(app App) error {

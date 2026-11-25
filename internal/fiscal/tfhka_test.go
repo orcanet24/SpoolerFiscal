@@ -180,7 +180,7 @@ func TestDescribeClearsStaleFlagsOnCleanResponse(t *testing.T) {
 }
 
 func TestGetStatusProbesPrinter(t *testing.T) {
-	p, stream := newTestPrinter(t, "0|0|1|0.00|0.00|0.00|0\r\n")
+	p, stream := newTestPrinter(t, tfhkaTestFrame("S2 00000000000000000\n 00000000000000000\n 00000000000000000\n00000000000000000\n 00000000000000000\n0000\n0"))
 	if err := p.Open(context.Background()); err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -194,18 +194,21 @@ func TestGetStatusProbesPrinter(t *testing.T) {
 		t.Fatal("debía reportar online")
 	}
 	stream.mu.Lock()
-	written := stream.written.String()
+	written := stream.written.Bytes()
 	stream.mu.Unlock()
-	if written != "S2\r" {
-		t.Fatalf("comando de sonda = %q", written)
+	if want := tfhkaFrame([]byte("S2")); !bytes.Equal(written, want) {
+		t.Fatalf("comando de sonda = % X, se esperaba % X", written, want)
 	}
 }
 
 func TestGetInfoParsesS1AndS5(t *testing.T) {
+	s1 := "S100\n00000000000000000\n00010850\n00000\n00000000\n00000\n00000259\n00000\n00000920\n00001\n0000\n0893\nJ-503895241\nZ7C7022079\n234331\n241126"
+	s5a := "S5J-503895241\nZ7C7022079\n0001\n1908\n1384\n012029"
+	s5b := "S5J-503895241\nZ7C7022079\n0001\n1908\n1340\n012030"
 	p, stream := newTestPrinter(t,
-		"0|SIMTFHKA01|J-12345678-9|7|1|42|3|2|1|1160.00|2026-11-14T10:00:00\r\n",
-		"SIMTFHKA01|J-12345678-9|1|4.00|3.60|7\r\n",
-		"SIMTFHKA01|J-12345678-9|1|4.00|3.40|7\r\n",
+		tfhkaTestFrame(s1),
+		tfhkaTestFrame(s5a),
+		tfhkaTestFrame(s5b),
 	)
 	if err := p.Open(context.Background()); err != nil {
 		t.Fatalf("Open: %v", err)
@@ -216,13 +219,13 @@ func TestGetInfoParsesS1AndS5(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetInfo: %v", err)
 	}
-	if info.Serial != "SIMTFHKA01" || info.RIF != "J-12345678-9" {
+	if info.Serial != "Z7C7022079" || info.RIF != "J-503895241" {
 		t.Fatalf("identificación = %+v", info)
 	}
-	if info.LastInvoice != 42 || info.LastCredit != 3 || info.LastDebit != 2 {
+	if info.LastInvoice != 10850 || info.LastCredit != 259 || info.LastDebit != 0 || info.LastZ != 893 {
 		t.Fatalf("correlativos reportados = %+v", info)
 	}
-	if info.MemoryTotalMB != 4.0 || info.MemoryFreeMB != 3.60 {
+	if info.MemoryTotalMB != 1908 || info.MemoryFreeMB != 1384 {
 		t.Fatalf("memoria fiscal = %+v", info)
 	}
 
@@ -232,31 +235,43 @@ func TestGetInfoParsesS1AndS5(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetInfo segunda llamada: %v", err)
 	}
-	if info2.MemoryFreeMB != 3.40 {
+	if info2.MemoryFreeMB != 1340 {
 		t.Fatalf("la memoria fiscal debía refrescarse: %+v", info2)
 	}
 	stream.mu.Lock()
 	defer stream.mu.Unlock()
-	if got := stream.written.String(); got != "S1\rS5\rS5\r" {
-		t.Fatalf("GetInfo debía enviar S1 una vez y S5 siempre; envió %q", got)
+	want := append(tfhkaFrame([]byte("S1")), tfhkaFrame([]byte("S5"))...)
+	want = append(want, tfhkaFrame([]byte("S5"))...)
+	if got := stream.written.Bytes(); !bytes.Equal(got, want) {
+		t.Fatalf("GetInfo debía enviar S1 una vez y S5 siempre; envió % X", got)
 	}
 }
 
-func TestSendResponsePreservesBytes(t *testing.T) {
-	payload := []byte{0x00, 0x02, 0xFF, 0x0D}
-	p, _ := newTestPrinter(t, string(payload))
+func TestReadResponsePreservesFrame(t *testing.T) {
+	p, _ := newTestPrinter(t, tfhkaTestFrame("S2 0000\n0000\n0"))
 	if err := p.Open(context.Background()); err != nil {
 		t.Fatalf("Open: %v", err)
 	}
 	defer func() { _ = p.Close() }()
-	if err := p.SendCommand(context.Background(), []byte("S1\r")); err != nil {
+	if err := p.SendCommand(context.Background(), []byte("S2\r")); err != nil {
 		t.Fatalf("SendCommand: %v", err)
 	}
 	resp, err := p.ReadResponse(context.Background())
 	if err != nil {
 		t.Fatalf("ReadResponse: %v", err)
 	}
-	if !bytes.Equal(resp, payload) {
-		t.Fatalf("respuesta alterada: %v != %v", resp, payload)
+	// El transporte es transparente: el agente reenvía estos bytes al COM
+	// virtual tal cual llegaron de la impresora.
+	if !bytes.Equal(resp, tfhkaFrame([]byte("S2 0000\n0000\n0"))) {
+		t.Fatalf("la trama debía conservarse: % X", resp)
 	}
+	// La interpretación sí descarta la envoltura.
+	if d := p.Describe([]byte("S2"), resp); d.Status.Raw != "S2 0000\n0000\n0" {
+		t.Fatalf("Describe no desenvolvió: %q", d.Status.Raw)
+	}
+}
+
+// tfhkaTestFrame arma la trama STX/ETX/LRC que envía la impresora real.
+func tfhkaTestFrame(s string) string {
+	return string(tfhkaFrame([]byte(s)))
 }

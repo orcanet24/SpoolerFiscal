@@ -1,137 +1,202 @@
-# Pruebas del spooler contra la impresora fiscal simulada
+# Pruebas del spooler (actualizado 2026-11-24)
 
-Guía para levantar el servidor y la estación, y enviar por `curl` los cinco
-documentos de la prueba: **factura, nota de crédito, nota de débito, reporte X
-y reporte Z**.
-
-> Todo lo que se emite contra el simulador es un **documento de prueba, no
-> fiscal**. Para facturar de verdad se usa la impresora fiscal certificada.
+> **Estado actual**: documentos no fiscales ✅, consultas S1-S5 ✅, facturas fiscales ❌ (NAK 0x15).
+> Ver [MANUAL.md §12](MANUAL.md#12-estado-actual-fiscal-vs-no-fiscal) para desbloquear fiscal.
 
 ---
 
 ## 1. Qué debe estar corriendo
 
-| Pieza | Cómo | Puerto |
+### 1.1 Contra impresora real (producción)
+
+| Pieza | Comando | Puerto |
 |---|---|---|
-| Impresora fiscal simulada | `C:\Proyectos\GO\SimuladorFiscalGO\iniciar_servicio.bat` (modo `serve`, modelo TFHKA) | TCP `127.0.0.1:2011` |
-| Servidor spooler | `.\bin\server\iniciar.bat` | API HTTP `8080` |
-| Estación (agente) | `.\bin\cliente\iniciar.bat` (opcional; requiere `com0com`) | COM virtual ↔ HTTP `8080` |
+| Servidor spooler | `C:\job\spooler\instalar.cmd` (como Admin) | API HTTP `8080` |
+| Estación (agente) | `cliente.exe -install -config ...` (como Admin) | COM virtual ↔ HTTP `8080` |
+| Profit Plus | Apuntando al COM virtual (ej. COM3) | 9600 8N1 |
 
-El servidor debe tener en `bin\server\configs\server.yaml`:
-
+El servidor usa `configs\server.yaml` con:
 ```yaml
+printer:
+  driver: tfhka
+  transport: serial
+  port:
+    name: COM1
+    baud_rate: 9600
+```
+
+### 1.2 Contra simulador (laboratorio, sin hardware fiscal)
+
+```bash
+# Impresora fiscal emulada (proyecto SimuladorFiscalGO)
+simuladorfiscal.exe serve --model tfhka --addr 127.0.0.1:2011
+
+# Servidor apuntando al emulador (editar server.yaml):
 printer:
   driver: tfhka
   transport: tcp
   tcp_address: 127.0.0.1:2011
 ```
 
-El token de la API es el de `bin\server\.env` (`SPOOLER_TOKEN`). En los ejemplos
-de abajo se usa `CAMBIAR-ESTE-TOKEN`; ajústalo si lo cambió.
+Prueba automática end-to-end:
+```bash
+$env:SPOOLER_E2E_PRINTER_ADDR = "127.0.0.1:2011"
+go test ./internal/e2e -run TestEndToEndInvoice -v
+```
+
+### 1.3 Papel real en térmica común (simprint)
+
+`simprint` emula protocolo TFHKA e imprime en térmica 80 mm (ESC/POS). **No emite documentos fiscales válidos**: sirve para probar el circuito completo (correlativo, cola, pausa por papel, reintentos).
+
+```powershell
+# Térmica instalada en Windows (USB00x), ej. Xprinter XP-80
+.\simprint.exe -listen 127.0.0.1:2011 -win-printer "Xprinter XP-80"
+
+# Térmica de red (puerto 9100)
+.\simprint.exe -listen 127.0.0.1:2011 -escpos-tcp 192.168.1.50:9100
+
+# Solo texto en consola (vista previa, sin hardware)
+.\simprint.exe -listen 127.0.0.1:2011
+```
+
+Con el servidor en `printer.transport = tcp`, `printer.tcp_address = 127.0.0.1:2011`, cada factura se imprime en la térmica. Tecla `p` + Enter alterna sensor de papel; `estado` muestra correlativos; `salir` guarda estado en `data\simprint_state.json`.
 
 ---
 
-## 2. Cómo activar server y cliente
+## 2. Cómo activar server y agente (producción)
 
-Doble clic (o desde su carpeta):
+```cmd
+REM Servidor (como Administrador)
+C:\job\spooler\instalar.cmd
 
-```powershell
-# servidor
-C:\Proyectos\GO\SpoolerFiscal\bin\server\iniciar.bat
-
-# estación (agente)
-C:\Proyectos\GO\SpoolerFiscal\bin\cliente\iniciar.bat
-```
-
-El `.bat` cambia al directorio del binario y pasa `-config configs\...`, así no
-hay que recordar rutas. Si prefiere el comando directo:
-
-```powershell
-cd C:\Proyectos\GO\SpoolerFiscal\bin\server
-.\server.exe -console -config configs\server.yaml
-
-cd C:\Proyectos\GO\SpoolerFiscal\bin\cliente
-.\cliente.exe -console -config configs\agent.yaml
+REM Agente en la estación (como Administrador)
+cliente.exe -install -config C:\SpoolerFiscal\configs\agent.yaml
+sc start SpoolerFiscalAgent
 ```
 
 Señales de que están vivos:
-
-- Server: `spooler fiscal escuchando addr=[::]:8080`.
-- Cliente: `agente iniciado estacion=CAJA-01 servidor=http://127.0.0.1:8080`.
+- Server: `instalar.cmd` muestra health + estado impresora + últimos números
+- Cliente: `agente iniciado estacion=CAJA-01 servidor=http://IP:8080` en log
 
 ---
 
-## 3. Ejemplos con curl
+## 3. Ejemplos con curl (producción)
 
-Todas las llamadas van a `http://127.0.0.1:8080` con el encabezado
-`Authorization: Bearer <token>`.
+Todas las llamadas van a `http://<servidor>:8080` con `Authorization: Bearer <token>`.
 
-### 3.1 Factura
-
-```powershell
-curl.exe -X POST http://127.0.0.1:8080/v1/invoices `
-  -H "Authorization: Bearer CAMBIAR-ESTE-TOKEN" `
-  -H "Content-Type: application/json" `
-  -H "Idempotency-Key: factura-1" `
-  -d "{\"station\":\"CAJA-01\",\"lines\":[\"!   1.000     10.00CAFE\",\"101\"]}"
-```
-
-Salida esperada: `HTTP 201` con `"document_type":"invoice"` y la respuesta de
-la impresora en `lines` (`0|Item|...` y `0|Factura N|Total: ...`).
-
-### 3.2 Nota de crédito
-
-Se abre con `d1`, los ítems van con `d<tipo>` y se cierra con `101`:
+### 3.1 Health y estado
 
 ```powershell
-curl.exe -X POST http://127.0.0.1:8080/v1/invoices `
-  -H "Authorization: Bearer CAMBIAR-ESTE-TOKEN" `
-  -H "Content-Type: application/json" `
-  -H "Idempotency-Key: nc-1" `
-  -d "{\"station\":\"CAJA-01\",\"lines\":[\"d1\",\"d1   1.000     10.00DEVOLUCION\",\"101\"]}"
+# Health (sin token)
+curl http://127.0.0.1:8080/v1/health
+
+# Estado impresora + sonda S2
+curl -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:8080/v1/status?probe=true"
+
+# Últimos números de control (S1 + S5)
+curl -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:8080/v1/printer"
 ```
 
-Salida esperada: `"document_type":"credit_note"` y `0|Nota de Credito N|...`.
-
-### 3.3 Nota de débito
-
-Se abre con `d2`, los ítems van con `` `<tipo> `` y se cierra con `101`:
+### 3.2 Documento no fiscal (funciona e imprime papel real)
 
 ```powershell
-curl.exe -X POST http://127.0.0.1:8080/v1/invoices `
-  -H "Authorization: Bearer CAMBIAR-ESTE-TOKEN" `
+# 80$ abre
+curl -X POST http://127.0.0.1:8080/v1/commands `
+  -H "Authorization: Bearer $TOKEN" `
   -H "Content-Type: application/json" `
-  -H "Idempotency-Key: nd-1" `
-  -d "{\"station\":\"CAJA-01\",\"lines\":[\"d2\",\"`1   1.000     10.00AJUSTE\",\"101\"]}"
+  -d '{"station":"TEST-CAJA","command_base64":"ODAk"}'
+
+# 80! escribe línea
+curl -X POST http://127.0.0.1:8080/v1/commands `
+  -H "Authorization: Bearer $TOKEN" `
+  -H "Content-Type: application/json" `
+  -d '{"station":"TEST-CAJA","command_base64":"ODAhUFJVRUJBIFRlc3QK"}'
+
+# 81 cierra e imprime
+curl -X POST http://127.0.0.1:8080/v1/commands `
+  -H "Authorization: Bearer $TOKEN" `
+  -H "Content-Type: application/json" `
+  -d '{"station":"TEST-CAJA","command_base64":"ODE="}'
 ```
 
-Salida esperada: `"document_type":"debit_note"` y `0|Nota de Debito N|...`.
-
-### 3.4 Reporte X (lectura, no reinicia)
-
-Los comandos sueltos usan `POST /v1/commands`:
+### 3.3 Consultas S1/S2/S3/S4/S5 (funcionan)
 
 ```powershell
-curl.exe -X POST http://127.0.0.1:8080/v1/commands `
-  -H "Authorization: Bearer CAMBIAR-ESTE-TOKEN" `
-  -H "Content-Type: application/json" `
-  -H "Idempotency-Key: x-1" `
-  -d "{\"station\":\"CAJA-01\",\"command\":\"U0X\"}"
+# S1 - identificación y correlativos
+curl -X POST .../v1/commands -d '{"station":"TEST","command_base64":"UzE="}'
+
+# S2 - estado operación
+curl -X POST .../v1/commands -d '{"station":"TEST","command_base64":"UzI="}'
+
+# S3 - totales por alícuota
+curl -X POST .../v1/commands -d '{"station":"TEST","command_base64":"UzM="}'
+
+# S4 - totales por forma de pago
+curl -X POST .../v1/commands -d '{"station":"TEST","command_base64":"UzQ="}'
+
+# S5 - memoria fiscal
+curl -X POST .../v1/commands -d '{"station":"TEST","command_base64":"UzU="}'
 ```
 
-Salida esperada: `HTTP 200` con `0|Reporte X #N|Ventas: ...|IVA: ...`.
-
-### 3.5 Reporte Z (cierre del día, reinicia acumulados)
+### 3.4 Factura fiscal (HOY devuelve NAK 0x15)
 
 ```powershell
-curl.exe -X POST http://127.0.0.1:8080/v1/commands `
-  -H "Authorization: Bearer CAMBIAR-ESTE-TOKEN" `
-  -H "Content-Type: application/json" `
-  -H "Idempotency-Key: z-1" `
-  -d "{\"station\":\"CAJA-01\",\"command\":\"U0Z\"}"
+# Con cliente previo (obligatorio en TFHKA)
+curl -X POST .../v1/commands -d '{"station":"TEST","command_base64":"aVIqSjEyMzQ1Njc4LTkK"}'  # iR*
+curl -X POST .../v1/commands -d '{"station":"TEST","command_base64":"aVMqQ09OU1VNSURPUiBGSU5BTAo="}' # iS*
+
+# Ítem + cierre
+curl -X POST .../v1/commands -d '{"station":"TEST","command_base64":"IT0gIDEuMDAwICAgMTAuMDBDQUZFCg=="}' # ! 1.000 10.00CAFE
+curl -X POST .../v1/commands -d '{"station":"TEST","command_base64":"MTAx"}'  # 101
 ```
 
-Salida esperada: `HTTP 200` con `0|Reporte Z #N|Ventas: ...|IVA: ...`.
+> Si sigue NAK, ver [MANUAL.md §12.2](MANUAL.md#122-pr%C3%B3ximos-pasos-para-desbloquear-fiscal).
+
+### 3.5 Factura vía /v1/invoices/structured (compila TFHKA automático)
+
+```powershell
+curl -X POST http://127.0.0.1:8080/v1/invoices/structured `
+  -H "Authorization: Bearer $TOKEN" `
+  -H "Content-Type: application/json" `
+  -H "Idempotency-Key: pedido-1001" `
+  -d '{
+    "station": "ECOM-01",
+    "customer": {"rif": "J-12345678-9", "name": "CLIENTE C.A.",
+                 "address": "Av. Principal", "phone": "0212-1234567"},
+    "items": [
+      {"description": "CAFE", "quantity": 1, "unit_price": 10.00, "tax": "general"},
+      {"description": "PAN",  "quantity": 2, "unit_price": 5.00,  "tax": "reduced"}
+    ],
+    "discount": 1.00,
+    "payments": [{"method": "tarjeta", "amount": 24.00}],
+    "totals": {"total": 24.00}
+  }'
+```
+
+Compila la secuencia canónica:
+```
+iR*J-12345678-9
+iS*CLIENTE C.A.
+i01Av. Principal
+i020212-1234567
+!   1.000     10.00CAFE
+"   2.000      5.00PAN
+3
+7001.00
+103tarjeta
+10024.00
+101
+```
+
+### 3.6 Reportes X y Z
+
+```powershell
+# X (lectura, no reinicia)
+curl -X POST .../v1/commands -d '{"station":"TEST","command":"U0X"}'
+
+# Z (cierre del día, reinicia acumulados)
+curl -X POST .../v1/commands -d '{"station":"TEST","command":"U0Z"}'
+```
 
 ---
 
@@ -139,9 +204,8 @@ Salida esperada: `HTTP 200` con `0|Reporte Z #N|Ventas: ...|IVA: ...`.
 
 - **Ítem**: `prefijo + cantidad(%8.3f) + precio(%10.2f) + descripción`.
   Prefijos: `!` general 16 %, `"` reducida 8 %, `#` adicional 30 %, ` ` exento.
-- **Ítem de nota de crédito**: `d<tipo> + cantidad + precio + descripción`
-  (`tipo`: 1 general, 2 reducida, 3 adicional, 0 exento).
-- **Ítem de nota de débito**: `` `<tipo> + cantidad + precio + descripción ``.
+- **Ítem nota crédito**: `d<tipo> + cantidad + precio + descripción` (`tipo`: 1 general, 2 reducida, 3 adicional, 0 exento).
+- **Ítem nota débito**: `` `<tipo> + cantidad + precio + descripción ``.
 - **Cierre/totalización**: `101`. **Apertura NC/ND**: `d1` / `d2`.
 - **Reportes**: `U0X` / `U1X` (X), `U0Z` / `U1Z` (Z).
 - **Estado**: `S1` (identificación y correlativos), `S2` (estado y papel).
@@ -151,25 +215,62 @@ Salida esperada: `HTTP 200` con `0|Reporte Z #N|Ventas: ...|IVA: ...`.
 ## 5. Consultas útiles
 
 ```powershell
-# estado del servidor (imprimible, cola, documento abierto, contadores)
-curl.exe http://127.0.0.1:8080/v1/status -H "Authorization: Bearer CAMBIAR-ESTE-TOKEN"
+# Estado del servidor (imprimible, cola, documento abierto, contadores)
+curl http://127.0.0.1:8080/v1/status -H "Authorization: Bearer $TOKEN"
 
-# historial de documentos emitidos
-curl.exe "http://127.0.0.1:8080/v1/documents?limit=10" -H "Authorization: Bearer CAMBIAR-ESTE-TOKEN"
+# Historial de documentos emitidos
+curl "http://127.0.0.1:8080/v1/documents?limit=10" -H "Authorization: Bearer $TOKEN"
 
-# cola de trabajos REST
-curl.exe "http://127.0.0.1:8080/v1/jobs?status=done" -H "Authorization: Bearer CAMBIAR-ESTE-TOKEN"
+# Cola de trabajos REST
+curl "http://127.0.0.1:8080/v1/jobs?status=done" -H "Authorization: Bearer $TOKEN"
 ```
 
-La **idempotencia** evita reemitir: repetir un `POST` con la misma
-`Idempotency-Key` devuelve la respuesta guardada sin volver a imprimir.
+La **idempotencia** evita reemitir: repetir un `POST` con la misma `Idempotency-Key` devuelve la respuesta guardada sin volver a imprimir.
 
 ---
 
-## 6. Sobre otras marcas de impresora
+## 6. Tests automatizados (CI/CD)
 
-El spooler **solo implementa el driver `tfhka`** (The Factory HKA). El
-simulador (SimuladorFiscalGO) puede emular además Hasar, Bixolon y Epson, pero
-esos modelos hablan otro protocolo (IxBatch) y **no** los entiende el spooler
-hasta que se implemente y registre su driver (`fiscal.RegisterDriver`). Los
-ejemplos de este documento son, por eso, con TFHKA.
+```bash
+# Todos los tests unitarios e integración
+go test ./...
+
+# Solo tests end-to-end (requieren simulador en 127.0.0.1:2011)
+$env:SPOOLER_E2E_PRINTER_ADDR = "127.0.0.1:2011"
+go test ./internal/e2e -v
+
+# Tests específicos
+go test ./internal/e2e -run TestEndToEndInvoice -v
+go test ./internal/e2e -run TestConcurrentStationsKeepSingleCorrelative -v
+go test ./internal/e2e -run TestRestartPreservesCorrelativeAndHistory -v
+```
+
+**Tests que garantizan la corrección:**
+- `TestEndToEndInvoice`: factura completa simulada
+- `TestConcurrentStationsKeepSingleCorrelative`: 3 estaciones, 1 correlativo único
+- `TestRestartPreservesCorrelativeAndHistory`: reinicio preserva BD y correlativo
+- `TestLoadTenStations`: carga con 10 estaciones concurrentes
+
+---
+
+## 7. Otras marcas de impresora
+
+`printer.driver` acepta: `tfhka`, `hasar`, `bixolon`, `epson`.
+Los tres últimos comparten protocolo **IxBatch** (`@OpenFiscalReceipt`, `@PrintLineItem`, `@Close`, `@Status`); Epson antepone `0xESTADO|0xERROR|` a cada respuesta.
+
+```yaml
+printer:
+  driver: hasar
+  transport: tcp
+  tcp_address: 127.0.0.1:2011
+```
+
+Factura nativa IxBatch:
+```powershell
+curl -X POST .../v1/invoices -d '{"station":"CAJA-01","lines":["@OpenFiscalReceipt","@PrintLineItem|CAFE|1.000|10.00|general","@Close"]}'
+```
+
+Notas IxBatch:
+- El número del documento lo reporta el **cierre** (`@Close`); no hay consulta tipo `S1`, así que la conciliación previa no existe y el spooler audita al cerrar.
+- `/v1/invoices/structured` **solo TFHKA** (responde `501 structured_not_supported`).
+- Recuperación de documento colgado usa `@Close`, no `101`.

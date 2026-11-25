@@ -44,7 +44,7 @@ cliente, pagos, descuentos u otros documentos.
 
 ```text
 Profit Plus ── COM virtual ── agent.exe ── HTTP ──┐
-                                                  ├── server.exe ── COM/serie ── TFHKA
+                                                  ├── server.exe ── COM/serie ── impresora fiscal
 Ecommerce / ERP / app ──────────── HTTP/JSON ──────┘
 ```
 
@@ -52,9 +52,12 @@ Ecommerce / ERP / app ──────────── HTTP/JSON ───�
   la cola serializada, el turno exclusivo de cada factura, el guardián de estado,
   la base SQLite y la API HTTP.
 - **`agent.exe`** se instala en cada estación Profit Plus. Comunica el COM
-  virtual local con el servidor por HTTP; transporta las tramas sin interpretarlas.
-- **Impresora:** el único driver implementado es `tfhka` (The Factory HKA,
-  protocolo ASCII). La conexión serie es para uso real; TCP se admite para
+  virtual local con el servidor por HTTP; transporta las tramas sin interpretarlas,
+  así que **no sabe ni le importa la marca de la impresora**: cambiar de TFHKA a
+  Hasar es un cambio en el servidor, no en las cajas.
+- **Impresora:** hay dos familias de protocolo implementadas: `tfhka` (The
+  Factory HKA, ASCII) y `hasar`/`bixolon`/`epson` (IxBatch `@...`; Epson añade un
+  envoltorio de estado). La conexión serie es para uso real; TCP se admite para
   laboratorio o un puente serie/red.
 - **API HTTP:** vive dentro de `server.exe`; los agentes y los sistemas externos
   comparten la misma impresora, cola, correlativo observado y auditoría.
@@ -68,23 +71,31 @@ ya completada cuando se reutiliza la misma clave y el mismo cuerpo.
 
 ### Impresoras compatibles y simulador
 
-Para uso fiscal real, el proyecto está implementado para impresoras fiscales
-**The Factory HKA compatibles con el protocolo TFHKA**. No tiene drivers para
-Epson, Hasar, Bixolon u otras marcas. Que una impresora tenga puerto serie no
-basta para hacerla compatible; un modelo de otra marca sólo podría funcionar si
-implementa el mismo protocolo, y eso no está garantizado ni se considera
-soportado por este proyecto.
+El servidor implementa dos familias de protocolo, elegidas con
+`printer.driver` en [`configs/server.yaml`](configs/server.yaml):
 
-El proyecto externo **SimuladorFiscalGO** declara
-simulación de cuatro protocolos/modelos: TFHKA, Hasar SMH/P-615F, Bixolon SRP-270
-y Epson TM2000. Puede usarse por TCP para probar cada driver que se implemente
-(por ejemplo, `127.0.0.1:2011` con `--model tfhka` y
-`printer.transport: tcp`). **Esto no significa que SpoolerFiscal ya soporte esos
-cuatro modelos:** su configuración y driver productivo siguen limitados a TFHKA;
-los otros controladores deben implementarse e integrarse primero. El simulador
-no viene incluido en este repositorio ni es una impresora fiscal real: sirve
-para probar comunicación y flujos de software, no para emitir documentos
-fiscales válidos ni sustituir hardware fiscal en producción.
+| `driver` | Marca / modelo | Protocolo |
+| --- | --- | --- |
+| `tfhka` | The Factory HKA (compatible) | ASCII: `!`/`"`/`#`, `101`, `S1`/`S2`, `U0X`/`U0Z` |
+| `hasar` | Hasar SMH/P-615F | IxBatch: `@OpenFiscalReceipt`, `@PrintLineItem`, `@Close`, `@Status` |
+| `bixolon` | Bixolon SRP-270 | IxBatch |
+| `epson` | Epson TM2000 | IxBatch con envoltorio `0xESTADO\|0xERROR\|` |
+
+La marca es una decisión **del servidor**: el agente de estación transporta
+bytes y no interpreta el protocolo, así que no hay que reinstalar nada en las
+cajas al cambiar de impresora. Otras marcas (NCR, Citizen, Datecs, etc.) hablan
+protocolos propios y requieren implementar su driver en
+`internal/fiscal` y registrarlo con `fiscal.RegisterDriver`; que una impresora
+tenga puerto serie no la hace compatible.
+
+El proyecto externo **SimuladorFiscalGO** implementa el lado impresora de las
+cuatro marcas con paridad byte a byte con su referencia, y es el contrato que
+usan las pruebas de este repositorio (`internal/fiscal`, `internal/e2e`). Puede
+usarse por TCP para probar el circuito (`--model tfhka|hasar|bixolon|epson` y
+`printer.transport: tcp`). El simulador no viene incluido en este repositorio ni
+es una impresora fiscal real: sirve para validar comunicación y flujos de
+software, no para emitir documentos fiscales válidos ni sustituir hardware
+fiscal en producción.
 
 ### Papel real con una térmica común: `simprint`
 
@@ -97,6 +108,25 @@ el panel de SimuladorFiscalGO, de modo que el spooler imprime en el papel
 virtual que se ve en el navegador. Al igual que los simuladores externos,
 **no emite documentos fiscales válidos**. Detalle en
 [`docs/INSTALACION.md`](docs/INSTALACION.md).
+
+### Localizar la impresora conectada: `detectar`
+
+Este repositorio incluye `cmd/detectar` (compilado a `bin\detectar.exe` por
+`build.bat`). Enumera los puertos serie que expone Windows, las colas de
+impresión instaladas y, si se pide, un rango de red; después envía a cada
+candidato las sondas de sólo lectura `S2` (estado) y `S1` (identificación) del
+protocolo TFHKA. **No imprime ni consume correlativo.**
+
+```powershell
+.\bin\detectar.exe                              # puertos serie y colas de Windows
+.\bin\detectar.exe -ports COM1,COM3 -bauds 9600,115200
+.\bin\detectar.exe -red 192.168.0.0/24          # impresoras/puentes por Ethernet
+.\bin\detectar.exe -json > deteccion.json       # informe para adjuntar
+```
+
+Sale con código 1 si no detecta ninguna impresora fiscal. Si informa "Windows
+no expone ningún puerto serie", el problema es de hardware o del controlador:
+una impresora conectada a COM1 no puede abrirse hasta que exista el puerto.
 
 Ejemplos de factura, nota de crédito, nota de débito, reporte X y reporte Z con
 `curl`, y cómo activar el servidor y el agente, en
@@ -177,17 +207,32 @@ Gacetas de la Imprenta Nacional](https://www.gacetaoficial.gob.ve/gacetas/filtro
 - **Servidor y estaciones:** Windows 10/11 o Windows Server 2019/2022, x64.
 - **Compilación:** Go **1.26 o superior**, conforme al `go.mod`. Go sólo hace
   falta en la máquina de compilación; los ejecutables no requieren instalarlo.
-- **Conexión fiscal:** impresora TFHKA compatible, conectada por puerto serie o
-  adaptador USB-serie. Ajuste COM y parámetros según el modelo y firmware.
+- **Conexión fiscal:** impresora fiscal compatible con alguno de los drivers
+  implementados (TFHKA, o Hasar/Bixolon/Epson por IxBatch), conectada por puerto
+  serie o adaptador USB-serie. Ajuste COM y parámetros según el modelo y firmware.
 - **Profit Plus:** puerto COM virtual por estación; la guía del proyecto utiliza
   com0com.
 - **Red:** el servidor expone una API HTTP (8080 por omisión) que usan los
   agentes de estación y los sistemas externos.
 
-## Instalación resumida
+## Instalación en 2 pasos (recomendada)
 
-Consulte la [guía de instalación completa](docs/INSTALACION.md) antes de
-desplegar en producción. El flujo básico es:
+1. **Compile:** doble clic en `build.bat` (o `.\scripts\build.ps1`).
+2. **Instale:** doble clic en **`INSTALAR.bat`** y elija *Servidor* o *Estación*.
+
+El instalador copia los binarios a `C:\SpoolerFiscal`, genera la configuración,
+restringe permisos, crea el **servicio de Windows** con inicio automático y
+reinicio ante fallos, abre el firewall (servidor) y comprueba que arranca. Al
+terminar muestra la ruta del panel, el estado y, en el servidor, el token que
+deben usar las estaciones. Guía: [Instalación con el instalador](docs/INSTALAR.md).
+
+Después de instalar el servidor, ejecute la
+[puesta en marcha con la impresora real](docs/PUESTA_EN_MARCHA.md).
+
+### Instalación manual (avanzada)
+
+Consulte la [guía de instalación completa](docs/INSTALACION.md). El flujo manual
+es:
 
 1. Compile los binarios:
 
@@ -195,7 +240,8 @@ desplegar en producción. El flujo básico es:
    .\scripts\build.ps1
    ```
 
-   Se generan `bin\server.exe` y `bin\agent.exe`.
+   Se generan `bin\server.exe`, `bin\agent.exe`, `bin\verificar.exe` y
+   `bin\detectar.exe`.
 2. En la PC con la impresora, configure `configs\server.yaml`: token único,
    puerto real de la impresora, lista de estaciones permitidas y opciones REST.
 3. Pruebe el servidor en consola:
@@ -334,9 +380,10 @@ curl -sS "$SPOOLER_URL/v1/jobs/JOB_ID" \
 ```
 
 Los estados pueden incluir `queued`, `printing`, `paused`, `aborted`, `done` y
-`canceled`. Un trabajo `paused` puede reanudarse cuando vuelva la impresora; un
-trabajo abortado requiere revisión y una nueva decisión de negocio, no un
-reintento ciego.
+`canceled`. Un trabajo `paused` se reanuda solo cuando vuelve la impresora o a
+pedido con `POST /v1/jobs/{id}/retry`; un trabajo sin líneas impresas se
+descarta con `POST /v1/jobs/{id}/cancel`; un trabajo abortado requiere revisión y
+una nueva decisión de negocio, no un reintento ciego.
 
 ### Reintentos y seguridad de emisión
 
@@ -349,9 +396,13 @@ reintento ciego.
 - Una falla a mitad de factura puede dejar un trabajo abortado y parte del
   contenido ya impreso. No cree una segunda factura automáticamente sin revisión
   operativa.
-- El token es compartido con las estaciones. Use HTTPS/TLS al cruzar redes no
-  confiables, limite el acceso mediante firewall y `allowed_stations`, y no
-  publique el puerto en Internet.
+- Use un token por estación (`station_tokens`) para que una caja no pueda emitir
+  en nombre de otra; el token compartido sigue sirviendo para la API externa.
+  Con `tls.ca_file` la API exige certificado de cliente (mTLS). Limite el acceso
+  con firewall y `allowed_stations`, y no publique el puerto en Internet.
+- El **panel de operación** (`/admin`) permite ver la cola, cancelar trabajos no
+  impresos y reintentar los pausados desde el navegador. La página no es un
+  secreto: las llamadas piden el token y se guarda sólo en la pestaña.
 
 ## API disponible
 
@@ -371,6 +422,8 @@ La API REST es opcional, HTTP/JSON y se configura en la sección `http` de
 | `POST /v1/invoices/structured` | Compila e imprime una factura a partir de ítems JSON. |
 | `GET /v1/jobs` | Lista trabajos REST y permite filtrar por estado. |
 | `GET /v1/jobs/{id}` | Consulta el detalle y resultado de un trabajo. |
+| `POST /v1/jobs/{id}/cancel` | Cancela un trabajo que todavía no llegó a papel. |
+| `POST /v1/jobs/{id}/retry` | Reencola un trabajo sin líneas impresas. |
 
 También se sirven la [documentación HTML](http://127.0.0.1:8080/docs) y el
 [contrato OpenAPI](http://127.0.0.1:8080/docs/openapi.yaml), si HTTP está activo.
@@ -379,20 +432,30 @@ códigos de error completos.
 
 ### Límites del endpoint structured
 
+- El compilador de ítems conoce las tasas y el formato de **TFHKA**. Con otro
+  driver responde `501 structured_not_supported`: envíe las líneas nativas por
+  `/v1/invoices` (`@OpenFiscalReceipt`, `@PrintLineItem`, `@Close`). Preferimos
+  rechazar a inventar una secuencia IxBatch sin validarla contra el hardware.
+- Acepta `customer` (RIF, nombre, dirección, teléfono), `discount` y `surcharge`
+  globales, y `payments` (medio y monto). Con `payments` imprime el subtotal
+  (`3`) y valida que los pagos cubran el total antes de imprimir.
 - `unit_price` incluye IVA; hasta dos decimales. `quantity` admite hasta tres.
 - Descripción ASCII imprimible de hasta 40 caracteres; no admite `|` ni
-  saltos de línea.
+  saltos de línea. El cliente y el medio de pago tampoco admiten `|` ni CR/LF.
 - Total de ítems y ancho de línea limitados por el protocolo TFHKA.
 - Si se envían `totals`, el total se compara con el calculado; una diferencia
-  fuera de tolerancia devuelve `400 totals_mismatch` y no se imprime.
-- No incluye identificación del cliente ni formas de pago. Use
-  `/v1/commands` sólo si conoce el protocolo TFHKA y el flujo correcto para el
-  hardware instalado.
+  fuera de tolerancia devuelve `400 totals_mismatch` y no se imprime. Con
+  descuento o recargo sólo se valida el total (el desglose puede variar).
+- No incluye referencia de factura original para notas de crédito: use
+  `/v1/invoices` con las líneas `iF*`/`iD*`/`iI*` y `d1`/`d2`.
 
 ## Operación, capacidad y datos
 
 - La impresora trabaja un documento a la vez. El turno por factura impide que
   estaciones distintas mezclen comandos en una misma factura.
+- El panel `/admin` muestra estado, cola y documentos, y permite cancelar un
+  trabajo que no llegó a papel o reintentar uno pausado. Las mismas operaciones
+  están en `POST /v1/jobs/{id}/cancel` y `/retry`.
 - La cola y el guardián bloquean emisiones ante condiciones configuradas, como
   falta de papel, memoria fiscal llena o errores del dispositivo.
 - La velocidad está limitada por la impresora; la capacidad observada con el
@@ -409,7 +472,13 @@ protocolo en [TFHKA](docs/PROTOCOLO_TFHKA.md).
 
 ## Ejemplos y documentación
 
+- [Instalación con el instalador](docs/INSTALAR.md) — servidor y estación como
+  servicio de Windows, en dos pasos
 - [API HTTP: referencia y ejemplos adicionales](docs/API.md)
+- [Puesta en marcha con la impresora real](docs/PUESTA_EN_MARCHA.md) — diagnóstico
+  sin imprimir, pruebas no fiscales, papel agotado y primera venta
+- [Panel de operación](http://127.0.0.1:8080/admin) — cola, cancelar y reintentar
+  desde el navegador (servido por `server.exe`)
 - [Manual HTML completo](docs/manual.html) — también se sirve en
   `/docs` cuando la API está activa
 - [Manual paso a paso (servidor y cliente)](docs/manual_paso_a_paso.html) — guía

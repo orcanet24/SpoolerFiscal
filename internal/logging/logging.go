@@ -70,3 +70,20 @@ func parseLevel(s string) slog.Level {
 		return slog.LevelInfo
 	}
 }
+
+// ReportConfigError deja constancia de un error de configuración en el archivo
+// de log por omisión. El servicio arranca sin consola y Load* falla antes de que
+// exista la configuración de logging: sin este apunte, la causa del fallo sólo
+// queda en el Visor de eventos como "el servicio terminó inesperadamente".
+func ReportConfigError(err error, configPath, defaultFile string) {
+	if err == nil {
+		return
+	}
+	logger, closeLog, setupErr := Setup(config.Logging{Level: "error", File: defaultFile}, defaultFile)
+	if setupErr != nil {
+		return
+	}
+	defer func() { _ = closeLog() }()
+	logger.Error("no se pudo cargar la configuración; el servicio no inicia",
+		"config", configPath, "error", err)
+}

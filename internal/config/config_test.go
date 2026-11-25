@@ -29,6 +29,107 @@ func TestLoadExampleServerConfig(t *testing.T) {
 	}
 }
 
+func TestValidateAcceptsImplementedDrivers(t *testing.T) {
+	for _, driver := range []string{"tfhka", "hasar", "bixolon", "epson", ""} {
+		cfg := DefaultServer()
+		cfg.Token = "token"
+		cfg.Printer.Driver = driver
+		cfg.Printer.Transport = "tcp"
+		cfg.Printer.TCPAddress = "127.0.0.1:2011"
+		if err := cfg.Validate(); err != nil {
+			t.Fatalf("driver %q: %v", driver, err)
+		}
+	}
+
+	cfg := DefaultServer()
+	cfg.Token = "token"
+	cfg.Printer.Driver = "ncr"
+	cfg.Printer.Transport = "tcp"
+	cfg.Printer.TCPAddress = "127.0.0.1:2011"
+	err := cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "no soportado") {
+		t.Fatalf("driver no implementado aceptado: %v", err)
+	}
+}
+
+// Un YAML con driver IxBatch debe cargar y validar sin tocar el resto.
+func TestLoadServerWithIxBatchDriver(t *testing.T) {
+	dir := t.TempDir()
+	db := filepath.ToSlash(filepath.Join(dir, "spooler.db"))
+	path := filepath.Join(dir, "server.yaml")
+	yaml := "token: token-ix\n" +
+		"database:\n  path: " + db + "\n" +
+		"http:\n  listen: 127.0.0.1:0\n" +
+		"printer:\n  driver: hasar\n  transport: tcp\n  tcp_address: 127.0.0.1:2011\n"
+	if err := os.WriteFile(path, []byte(yaml), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	cfg, err := LoadServer(path)
+	if err != nil {
+		t.Fatalf("LoadServer: %v", err)
+	}
+	if cfg.Printer.Driver != "hasar" {
+		t.Fatalf("driver = %q", cfg.Printer.Driver)
+	}
+	if cfg.Queue.MaxPending != 256 {
+		t.Fatalf("los defaults se perdieron: max_pending = %d", cfg.Queue.MaxPending)
+	}
+	if cfg.Printer.StatusProbe != "S2" {
+		t.Fatalf("status_probe = %q", cfg.Printer.StatusProbe)
+	}
+}
+
+func TestValidateStationTokens(t *testing.T) {
+	base := func() Server {
+		s := DefaultServer()
+		s.Token = "compartido"
+		s.Printer.Transport = "tcp"
+		s.Printer.TCPAddress = "127.0.0.1:2011"
+		return s
+	}
+	valid := base()
+	valid.StationTokens = map[string]string{"CAJA-01": "token-1", "CAJA-02": "token-2"}
+	if err := valid.Validate(); err != nil {
+		t.Fatalf("tokens válidos rechazados: %v", err)
+	}
+
+	cases := []struct {
+		name   string
+		tokens map[string]string
+	}{
+		{"token compartido", map[string]string{"CAJA-01": "compartido"}},
+		{"token duplicado", map[string]string{"CAJA-01": "t", "CAJA-02": "t"}},
+		{"estación inválida", map[string]string{"CAJA 01": "t"}},
+		{"token vacío", map[string]string{"CAJA-01": ""}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := base()
+			s.StationTokens = tc.tokens
+			if err := s.Validate(); err == nil {
+				t.Fatalf("debía rechazarse: %v", tc.tokens)
+			}
+		})
+	}
+}
+
+func TestValidateAgentTLSPair(t *testing.T) {
+	a := DefaultAgent()
+	a.StationID = "CAJA-01"
+	a.Server.Token = "t"
+	a.Server.Address = "https://127.0.0.1:8080"
+	a.VirtualCOM.Name = "COM4"
+
+	a.Server.TLS = TLS{Enabled: true, CertFile: "cliente.pem"}
+	if err := a.Validate(); err == nil {
+		t.Fatal("cert_file sin key_file debía rechazarse")
+	}
+	a.Server.TLS = TLS{Enabled: true, CertFile: "cliente.pem", KeyFile: "cliente.key"}
+	if err := a.Validate(); err != nil {
+		t.Fatalf("par cert/key válido rechazado: %v", err)
+	}
+}
+
 func TestLoadExampleAgentConfig(t *testing.T) {
 	cfg, err := LoadAgent(filepath.Join("..", "..", "configs", "agent.yaml"))
 	if err != nil {

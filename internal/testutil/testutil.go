@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"spoolerfiscal/internal/fiscal"
 	"spoolerfiscal/internal/frame"
 )
 
@@ -42,7 +43,7 @@ func Pipe() (frame.Stream, frame.Stream) {
 }
 
 // TFHKASim emula una impresora TFHKA a nivel de protocolo ASCII: responde los
-// comandos y lleva correlativos reales.
+// comandos y lleva correlativos reales. Habla la trama STX/ETX/LRC real.
 type TFHKASim struct {
 	mu        sync.Mutex
 	open      bool
@@ -51,6 +52,7 @@ type TFHKASim struct {
 	credit    int64
 	debit     int64
 	nonFiscal int64
+	z         int64
 	commands  []string
 }
 
@@ -77,15 +79,31 @@ func (s *TFHKASim) Handle(raw string) string {
 		s.invoices++
 		return fmt.Sprintf("0|Factura %d|Total: 116.00|Impreso:%d", s.invoices, s.invoices)
 	case cmd == "S1":
-		return fmt.Sprintf("0|SIMTFHKA01|J-12345678-9|7|1|%d|%d|%d|%d|1160.00|2026-11-14T10:00:00",
-			s.invoices, s.credit, s.debit, s.nonFiscal)
+		return fmt.Sprintf("S100\n00000000000000000\n%08d\n00000\n00000000\n00000\n%08d\n%05d\n%08d\n00001\n0000\n%04d\nJ-12345678-9\nSIMTFHKA01\n120000\n010126",
+			s.invoices, s.credit, s.debit, s.nonFiscal, s.z)
 	case cmd == "S2":
-		return "0|0|1|0.00|0.00|0.00|0"
+		return "S2 00000000000000000\n 00000000000000000\n 00000000000000000\n00000000000000000\n 00000000000000000\n0000\n0"
 	case cmd == "S5":
-		return "SIMTFHKA01|J-12345678-9|1|4.00|3.60|7"
+		return "S5J-12345678-9\nSIMTFHKA01\n0001\n1908\n1384\n012029"
+	case cmd == "3":
+		return "0|Subtotal"
+	case strings.HasPrefix(cmd, "700"):
+		return "0|Descuento"
+	case strings.HasPrefix(cmd, "701"):
+		return "0|Recargo"
+	case strings.HasPrefix(cmd, "103"):
+		return "0|Descripcion pago"
+	case strings.HasPrefix(cmd, "100"):
+		return "0|Pago"
+	case strings.HasPrefix(cmd, "iR*"), strings.HasPrefix(cmd, "iS*"),
+		strings.HasPrefix(cmd, "i01"), strings.HasPrefix(cmd, "i02"),
+		strings.HasPrefix(cmd, "iF*"), strings.HasPrefix(cmd, "iD*"),
+		strings.HasPrefix(cmd, "iI*"):
+		return "0|Dato registrado"
 	case cmd == "U0X", cmd == "U1X":
 		return "0|Reporte X #1|Ventas: 116.00|IVA: 16.00|Impreso:1"
 	case cmd == "U0Z", cmd == "U1Z":
+		s.z++
 		return "0|Reporte Z #1|Ventas: 116.00|IVA: 16.00|Impreso:1"
 	case cmd == "80$":
 		return "0|DNF abierto"
@@ -149,11 +167,14 @@ func (s *TFHKASim) Serve(ctx context.Context, st frame.Stream, gap time.Duration
 		if len(cmd) == 0 {
 			continue
 		}
+		// El driver real envía STX/ETX/LRC; se acepta texto plano por comodidad
+		// de las pruebas que llaman a Serve con flujos ya decodificados.
+		cmd = fiscal.UnframeSTX(cmd)
 		resp := s.Handle(string(cmd))
 		if d := s.currentDelay(); d > 0 {
 			time.Sleep(d)
 		}
-		if err := frame.WriteSettled(st, []byte(resp+"\r\n"), 0); err != nil {
+		if err := frame.WriteSettled(st, fiscal.FrameSTX([]byte(resp)), 0); err != nil {
 			return err
 		}
 	}

@@ -1,224 +1,208 @@
-# Manual de instalación
+# Instalación y despliegue (versión atómica, CMD-only)
 
-Arquitectura: **una PC servidor** con la impresora fiscal conectada y **una PC por
-estación** con Profit Plus. Todas en la misma red.
+> **Cambio 2026-11-24**: el despliegue real está en `C:\job\spooler` con un solo
+> binario `server.exe` (~13 MB) y tres scripts CMD. No hay `bin\`, no hay
+> `scripts\build.ps1` en producción, no hay PowerShell obligatorio.
 
-## 0. Requisitos
+## 1. Estructura de producción (`C:\job\spooler`)
 
-- Windows 10/11 o Server 2019/2022, x64.
-- Go 1.24 o superior **sólo en la máquina de compilación** (los ejecutables no lo
-  necesitan).
-- Puerto serie físico para la impresora (o adaptador USB-serie).
-- Firewall: el puerto HTTP del servidor (8080 por omisión) accesible desde las
-  estaciones.
-- Permisos de administrador para instalar servicios y com0com.
-
-## 1. Compilar
-
-```powershell
-cd C:\Proyectos\GO\SpoolerFiscal
-.\scripts\build.ps1
+```
+C:\job\spooler\
+├── server.exe              # binario único (Go static, sin deps externas)
+├── server.new.exe          # binario nuevo (instalar.cmd lo usa para actualizar)
+├── cliente.exe             # agente de estación (~8 MB)
+├── configs\
+│   └── server.yaml         # configuración completa (puerto, token, BD, logs)
+├── data\
+│   └── spooler.db          # SQLite WAL (auditoría, correlativo, idempotencia)
+├── logs\
+│   └── server.log          # rotativo 20 MB × 10
+├── instalar.cmd            # instala/actualiza + arranca (ejecutar como Admin)
+├── verificar.cmd           # health + sonda S2 + /v1/printer
+└── desinstalar.cmd         # para y elimina servicio (datos y config se conservan)
 ```
 
-Genera `bin\server.exe` y `bin\agent.exe`. También puede compilar a mano:
+## 2. Instalación (ejecutar como Administrador)
 
-```powershell
-go build -o bin\server.exe .\cmd\server
-go build -o bin\agent.exe   .\cmd\agent
+```cmd
+C:\job\spooler\instalar.cmd
 ```
 
-## 2. Servidor (PC con la impresora)
+**Qué hace `instalar.cmd` automáticamente:**
 
-1. Copie a la PC servidor: `bin\server.exe`, `configs\server.yaml` y una carpeta
-   `data\` escribible. Estructura sugerida: `C:\SpoolerFiscal\`.
-2. Edite `configs\server.yaml`:
-   - `http.listen`: `0.0.0.0:8080` (único puerto; lo usan agentes y sistemas externos).
-   - `token`: un secreto largo y único (o use la variable `SPOOLER_TOKEN`).
-   - `printer.port.name`: el COM real de la impresora (ej. `COM1`).
-   - `printer.port.baud_rate`: 9600 o 115200 según la impresora.
-   - `allowed_stations`: opcional, lista de estaciones autorizadas.
-3. Pruebe en consola antes de instalar:
+1. **Para el servicio** si está corriendo (`sc stop`)
+2. **Reemplaza el binario**: copia `server.new.exe` → `server.exe` (reintenta hasta 20 s si está en uso)
+3. **Instala/actualiza el servicio** `SpoolerFiscalServer`:
+   - Inicio automático (`AUTO_START`)
+   - Recovery: reinicio a 5 s, 10 s, 30 s (contador diario 86400 s)
+   - Reinicio también en fallos no-crash (código ≠ 0)
+4. **Abre puerto 8080** en firewall (perfiles domain + private)
+5. **Arranca el servicio** y espera a que la API responda (`/v1/health`)
+6. **Muestra verificación completa**:
+   - Health check
+   - Estado impresora (sonda S2 real)
+   - **Últimos números de control fiscales** (`/v1/printer`: serial, RIF, última factura, último Z, memoria)
 
-   ```powershell
-   .\bin\server.exe -console -config .\configs\server.yaml
+## 3. Verificación en cualquier momento
+
+```cmd
+C:\job\spooler\verificar.cmd
+```
+
+Salida típica:
+```
+--- Servicio ---
+NOMBRE_SERVICIO: SpoolerFiscalServer
+        ESTADO             : 4  RUNNING
+
+--- API ---
+{"driver":"tfhka","protocol_version":1,"status":"ok","uptime_seconds":123}
+
+--- Impresora (sonda S2) ---
+{"printer":{"online":true,"status_byte":0,"error_byte":0,"raw":"S2 00000000000000000\n..."},"online":true,"blocked":false,"queue_depth":0}
+
+--- Ultimos numeros de control ---
+{"brand":"tfhka","serial":"Z7C7022079","fiscal_rif":"J-503895241",
+ "last_invoice_number":10850,"last_credit_note":259,"last_debit_note":0,
+ "last_non_fiscal_doc":921,"last_z_number":893,
+ "fiscal_memory_total_mb":1908,"fiscal_memory_free_mb":1384}
+```
+
+## 4. Desinstalación (ejecutar como Administrador)
+
+```cmd
+C:\job\spooler\desinstalar.cmd
+```
+> Detiene y elimina el servicio. **Los datos (`data\spooler.db`) y la configuración (`configs\server.yaml`) NO se borran**.
+
+## 5. Actualización de versión
+
+1. Compile el nuevo binario (en máquina de desarrollo):
+   ```bash
+   go build -trimpath -ldflags "-s -w" -o server.exe ./cmd/server
    ```
-
-   Debe registrar `spooler fiscal escuchando` y el driver configurado.
-4. Instale el servicio (inicio automático + reinicio ante fallos):
-
-   ```powershell
-   .\scripts\install-server.ps1 -Root C:\SpoolerFiscal
-   ```
-
-   Equivalente manual:
-
+2. Copie `server.exe` como `server.new.exe` a `C:\job\spooler\` (sobrescriba el anterior)
+3. Ejecute **como Administrador**:
    ```cmd
-   sc create SpoolerFiscalServer binPath= "C:\SpoolerFiscal\bin\server.exe -config C:\SpoolerFiscal\configs\server.yaml" start= auto
-   sc start SpoolerFiscalServer
+   C:\job\spooler\instalar.cmd
    ```
+   - El script detecta `server.new.exe`, para el servicio, reemplaza `server.exe`, reinstala el servicio y lo arranca.
+4. Verifique: `C:\job\spooler\verificar.cmd`
 
-5. Abra el puerto en el firewall:
+## 6. Configuración (`configs\server.yaml`)
 
-   ```powershell
-   New-NetFirewallRule -DisplayName "Spooler Fiscal HTTP" -Direction Inbound -Protocol TCP -LocalPort 8080 -Action Allow
-   ```
+```yaml
+token: sk-00001235986413sdgKJsdf34d546hgjAF
 
-   La REST comparte el token de las estaciones. Si cruza una red no confiable,
-   active `tls.enabled` (sirve HTTPS con el mismo certificado) y no la exponga a
-   Internet.
+printer:
+  driver: tfhka
+  transport: serial
+  port:
+    name: COM1
+    baud_rate: 9600
+    data_bits: 8
+    parity: none
+    stop_bits: "1"
+    flow_control: none
+  read_gap_ms: 100
+  response_timeout_ms: 20000
+  max_response_bytes: 32768
+  status_probe: "S2"
+  command_terminator: "\r\n"      # el driver envuelve en STX/ETX/LRC
+  open_retry_ms: 500
 
-## 3. Estación (PC con Profit Plus)
+http:
+  listen: 0.0.0.0:8080
+  max_body_bytes: 262144
+  idempotency_retention_days: 30
 
-### 3.1 Crear el par de puertos virtuales
+queue:
+  max_pending: 256
+  default_timeout_ms: 30000
+  max_timeout_ms: 120000
+  document_lock_timeout_ms: 120000
 
-1. Instale com0com (driver firmado, gratuito): <https://sourceforge.net/projects/com0com/>.
-2. Créelo con el script incluido, en PowerShell **como administrador**:
+database:
+  path: C:\job\spooler\data\spooler.db
+  log_commands: true
+  retention_days: 365
 
-   ```powershell
-   .\scripts\setup-com0com.ps1 -ProfitPort COM3 -AgentPort COM4
-   ```
-
-   O manualmente:
-
-   ```
-   "C:\Program Files (x86)\com0com\setupc.exe" install PortName=COM3 PortName=COM4
-   ```
-
-3. Verifique en el Administrador de dispositivos que aparecen `COM3` y `COM4`
-   emparejados.
-
-> `COM3` queda para Profit Plus; `COM4` lo abre el agente. Si esos números están
-> ocupados, use otros (por ejemplo `COM11`/`COM12`) y ajuste la configuración.
-
-### 3.2 Configurar el agente
-
-1. Copie a la estación: `bin\agent.exe`, `configs\agent.yaml` y una carpeta
-   `logs\`. Estructura sugerida: `C:\SpoolerFiscal\`.
-2. Edite `configs\agent.yaml`:
-   - `station_id`: único por estación (`CAJA-01`, `CAJA-02`, …). **No lo repita**:
-     es la identidad que queda en la auditoría.
-   - `server.address`: `http://IP-del-servidor:8080`.
-   - `server.token`: el mismo del servidor.
-   - `virtual_com.name`: `COM4` (el extremo del agente).
-   - `virtual_com`: los mismos parámetros que la impresora (9600 8N1 típico).
-   - `logging.console`: `false` cuando corra como servicio.
-3. Pruebe en consola:
-
-   ```powershell
-   .\bin\agent.exe -console -config .\configs\agent.yaml
-   ```
-
-   Debe mostrar `COM virtual abierto` y `conectado al spooler`.
-4. Instale el servicio:
-
-   ```powershell
-   .\scripts\install-agent.ps1 -Root C:\SpoolerFiscal
-   ```
-
-### 3.3 Apuntar Profit Plus al puerto virtual
-
-Ver [`PROFITPLUS.md`](PROFITPLUS.md). En resumen: impresora fiscal **TFHKA /
-The Factory**, puerto **COM3**, 9600 8N1, sin control de flujo.
-
-## 4. Verificación de extremo a extremo
-
-1. En el servidor, revise `logs\server.log`: debe aparecer `sesión abierta` con el
-   `station_id` al abrir Profit Plus.
-2. Emita una factura de prueba desde Profit Plus.
-3. En el servidor debe aparecer `documento fiscal registrado` con tipo, número y
-   estación; en la estación, `documentos registrados` por el spooler.
-4. En la base: `data\spooler.db`, tabla `documents`.
-5. API HTTP:
-
-   ```bash
-   curl http://127.0.0.1:8080/v1/health
-   curl -H "Authorization: Bearer CAMBIAR-ESTE-TOKEN" http://127.0.0.1:8080/v1/status
-   ```
-
-   Una factura completa desde un sistema externo:
-
-   ```bash
-   curl -X POST http://127.0.0.1:8080/v1/invoices \
-     -H "Authorization: Bearer CAMBIAR-ESTE-TOKEN" \
-     -H "Content-Type: application/json" \
-     -H "Idempotency-Key: pedido-1001" \
-     -d '{"station":"ECOM-01","lines":["!   1.000     10.00CAFE","101"]}'
-   ```
-
-   Detalle en [`API.md`](API.md) y contrato en [`../api/openapi.yaml`](../api/openapi.yaml).
-
-Prueba sin impresora física (laboratorio):
-
-```powershell
-# impresora fiscal emulada (proyecto SimuladorFiscalGO)
-.\simuladorfiscal.exe serve --model tfhka --addr 127.0.0.1:2011
-
-# servidor apuntando al emulador: printer.transport = tcp, tcp_address = 127.0.0.1:2011
-
-# prueba automática contra el emulador
-$env:SPOOLER_E2E_PRINTER_ADDR = "127.0.0.1:2011"
-go test ./internal/e2e -run TestAgainstExternalPrinter -v
+logging:
+  level: info
+  file: C:\job\spooler\logs\server.log
+  console: true
+  max_size_mb: 20
+  max_backups: 10
+  max_age_days: 30
+  compress: true
 ```
 
-### Papel real en una térmica común (simprint)
+## 7. Estación (PC con Profit Plus) — Agente
 
-`simprint` (en `bin\simprint\simprint.exe`, incluido por `build.bat`) es un
-emulador de impresora fiscal TFHKA que **imprime con papel real** en una
-térmica de 80 mm (ESC/POS): hace de impresora fiscal en el protocolo y de
-térmica en la salida. No emite documentos fiscales válidos: es para probar el
-circuito completo (correlativo, cola, pausa por papel, reintentos, formato).
+### 7.1 Puerto virtual (com0com)
 
-```powershell
-# térmica instalada en Windows (USB00x), como una Xprinter XP-80
-.\bin\simprint\simprint.exe -listen 127.0.0.1:2011 -win-printer "Xprinter XP-80"
+```cmd
+# Como Administrador:
+"C:\Program Files (x86)\com0com\setupc.exe" install PortName=COM3 PortName=COM4
+```
+- `COM3` → Profit Plus (impresora TFHKA, 9600 8N1)
+- `COM4` → Agente (`virtual_com.name` en `agent.yaml`)
 
-# térmica de red (puerto 9100)
-.\bin\simprint\simprint.exe -listen 127.0.0.1:2011 -escpos-tcp 192.168.1.50:9100
+### 7.2 Configuración del agente (`configs\agent.yaml`)
 
-# térmica por puerto COM (modo CDC/serie)
-.\bin\simprint\simprint.exe -listen 127.0.0.1:2011 -com COM5
-
-# solo texto en consola (vista previa, sin hardware)
-.\bin\simprint\simprint.exe -listen 127.0.0.1:2011
+```yaml
+station_id: CAJA-01              # único por estación
+server:
+  address: http://IP-SERVIDOR:8080
+  token: sk-00001235986413sdgKJsdf34d546hgjAF
+  request_timeout_ms: 30000
+bridge:
+  local_queue_size: 16
+  max_send_backoff_ms: 2000
+virtual_com:
+  name: COM4
+  baud_rate: 9600
 ```
 
-Con el servidor apuntado a `printer.transport = tcp` y
-`printer.tcp_address = 127.0.0.1:2011`, cada factura del spooler se imprime en
-la térmica. La tecla `p` + Enter alterna el sensor de papel para probar la
-pausa y reanudación de la cola; `estado` muestra los correlativos; `salir`
-cierra guardando el estado en `data\simprint_state.json`.
+### 7.3 Instalar agente (en la estación, como Admin)
 
-### Ver la factura en el panel de SimuladorFiscalGO (puente TCP→panel)
-
-Con `-panel`, `simprint` recibe el protocolo por TCP y lo reenvía por HTTP al
-panel web de **SimuladorFiscalGO**: la factura se ve en el papel virtual del
-navegador (`http://127.0.0.1:8787`) con el mismo recorrido que una impresora
-real (pre-vuelo S1, ítems, cierre y conciliación).
-
-```powershell
-# 1) panel del simulador (una sola instancia, la que se ve)
-& C:\Proyectos\GO\SimuladorFiscalGO\simuladorfiscal.exe panel --host 127.0.0.1 --port 8787 --no-browser
-
-# 2) puente: spooler <-TCP:2011- simprint -HTTP-> panel :8787
-.\bin\simprint\simprint.exe -listen 127.0.0.1:2011 -panel http://127.0.0.1:8787
-
-# 3) servidor: printer.transport = tcp, printer.tcp_address = 127.0.0.1:2011
-# 4) factura por curl -> se imprime en el panel
-curl.exe -X POST http://127.0.0.1:8080/v1/invoices -H "Authorization: Bearer CAMBIAR-ESTE-TOKEN" `
-  -H "Content-Type: application/json" -H "Idempotency-Key: pedido-1" `
-  -d '{\"station\":\"CAJA-01\",\"lines\":[\"!   1.000     10.00CAFE\",\"101\"]}'
+```cmd
+cliente.exe -install -config C:\SpoolerFiscal\configs\agent.yaml
+sc start SpoolerFiscalAgent
 ```
 
-El agente de estación (`bin\cliente`) se conecta al servidor por HTTP con el
-`.env` (`SPOOLER_SERVER_ADDR=http://127.0.0.1:8080`, `SPOOLER_TOKEN` y
-`SPOOLER_STATION_ID`); el puente COM de la estación requiere `com0com`.
+## 8. Puesta en marcha con la impresora real
 
+**ANTES**: servicio detenido (`sc stop SpoolerFiscalServer`), Profit Plus cerrado.
 
-## 5. Desinstalar
+```cmd
+# 1. Diagnóstico sin imprimir (obligatorio)
+C:\job\spooler\verificar.cmd
+# Debe mostrar serial Z7C7022079, RIF J-503895241, última factura 10850, memoria 1384/1908 MB
 
-```powershell
-.\scripts\uninstall.ps1            # ambos servicios
-.\scripts\uninstall.ps1 -Only agent
+# 2. Arrancar servicio
+C:\job\spooler\instalar.cmd
+
+# 3. Primera venta real desde Profit Plus (no factura de prueba)
+# 4. Verificar en /v1/documents y /v1/status que el correlativo subió y no hay duplicados
 ```
 
-Los datos (`data\spooler.db`) y los logs no se borran.
+> **Nota**: hoy los documentos **no fiscales** funcionan e imprimen papel. Las facturas fiscales devuelven NAK (0x15) — ver sección 12 del MANUAL.md para desbloquear.
+
+## 9. Respaldo
+
+- Con servicio detenido: copie `C:\job\spooler\data\spooler.db` (y `-wal`/`-shm` si existen).
+- La base es la evidencia del correlativo fiscal: respáldela antes de cualquier actualización.
+
+## 10. Lo que NO hay en producción
+
+| Lo que había antes | Estado ahora |
+|-------------------|--------------|
+| `bin\server.exe`, `bin\agent.exe` | ❌ Un solo `server.exe` + `cliente.exe` en raíz |
+| `scripts\build.ps1`, `install-server.ps1`, `install-agent.ps1` | ❌ Solo `instalar.cmd`, `verificar.cmd`, `desinstalar.cmd` |
+| `configs\agent.yaml` en servidor | ❌ Solo en la estación |
+| `data\opencode-desktop-win-x64.exe` | ❌ Borrado (262 MB innecesarios) |
+| `TfhkaWrapper\` (puente .NET) | ❌ Movido a `_obsoleto\` (solo diagnóstico histórico) |
+| `.bak`, `.ps1` de prueba, logs de consola | ❌ Limpio |
+
+**Resultado**: ~13 MB de binario + 3 CMD + config + BD + logs. Listo para producción.

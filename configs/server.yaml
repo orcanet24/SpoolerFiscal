@@ -5,10 +5,19 @@
 # El servidor escucha una única API HTTP: la usan los agentes de estación y
 # los sistemas externos (ecommerce, ERP, CRM).
 
-# Token compartido con los agentes. Cámbielo en producción.
+# Token compartido: lo usan los sistemas externos y las estaciones que no
+# tengan token propio. Cámbielo en producción.
 token: CAMBIAR-ESTE-TOKEN
 
-# mTLS opcional (mejora futura ya soportada). Requiere certificados.
+# Token por estación (opcional). Si una estación tiene token propio, SÓLO ese
+# token puede emitir en su nombre; el compartido deja de representarla. Así una
+# caja comprometida no puede facturar como otra.
+station_tokens: {}
+#  CAJA-01: CAMBIAR-TOKEN-CAJA-01
+#  CAJA-02: CAMBIAR-TOKEN-CAJA-02
+
+# TLS. Con tls.ca_file el servidor exige certificado de cliente (mTLS) firmado
+# por esa CA; el agente debe configurar cert_file/key_file.
 tls:
   enabled: false
   ca_file: ""          # CA que firma los certificados de las estaciones (activa mTLS)
@@ -19,7 +28,13 @@ tls:
 allowed_stations: []
 
 printer:
-  driver: tfhka              # único driver implementado (The Factory HKA, ASCII)
+  # Familias implementadas:
+  #   tfhka            The Factory HKA (protocolo ASCII)
+  #   hasar            Hasar SMH/P-615F (IxBatch @...)
+  #   bixolon          Bixolon SRP-270   (IxBatch @...)
+  #   epson            Epson TM2000      (IxBatch + envoltorio 0xESTADO|0xERROR|)
+  # La marca la elige el servidor: las estaciones sólo transportan bytes.
+  driver: tfhka
   transport: serial          # serial | tcp (tcp = laboratorio / ser2net)
   port:
     name: COM1
@@ -30,12 +45,12 @@ printer:
     flow_control: none       # none | xonxoff (rtscts: configúrelo en el driver)
   tcp_address: 127.0.0.1:2011
   tcp_dial_timeout_ms: 3000
-  read_gap_ms: 30            # silencio que cierra una respuesta
+  read_gap_ms: 100           # silencio que cierra una respuesta
   response_timeout_ms: 20000
   max_response_bytes: 32768
   write_settle_ms: 0
-  status_probe: S2           # comando de sonda de estado
-  command_terminator: "\r\n"   # CR+LF: con CR solo la TFHKA no responde
+  status_probe: S2           # sonda de estado; IxBatch usa @Status automáticamente
+  command_terminator: "\r\n"   # el driver envuelve cada comando en STX/ETX/LRC
   open_retry_ms: 500
 
 queue:

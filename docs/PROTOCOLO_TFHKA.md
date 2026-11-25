@@ -1,20 +1,26 @@
-# Protocolo fiscal soportado: TFHKA (The Factory HKA), ASCII
+# Protocolo fiscal soportado: TFHKA (The Factory HKA), ASCII + STX/ETX/LRC
 
-Implementación: `internal/fiscal/tfhka.go`. El agente **no** interpreta nada de
-esto: transporta bytes. Toda la interpretación ocurre en el servidor, junto a la
-impresora.
+Implementación: `internal/fiscal/tfhka.go` + `internal/fiscal/stxframe.go`. El agente
+**no** interpreta nada de esto: transporta bytes. Toda la interpretación ocurre en el
+servidor, junto a la impresora.
 
-## 1. Transporte y framing
+## 1. Transporte y framing (REAL, confirmado contra HKA80)
 
 - Serie: 9600 8N1 (o 115200 8N1), sin control de flujo. Parámetros en
   `printer.port`.
-- Comando: texto ASCII terminado en `CR+LF` (`0x0D 0x0A`), configurable en
-  `printer.command_terminator`. **Con `CR` solo la TFHKA no responde** (probado
-  contra el simulador de referencia); use `"\r\n"`.
-- Respuesta: texto ASCII terminado en `CR`/`LF`.
-- **Delimitación por silencio:** una trama termina cuando el emisor deja de enviar
-  durante `read_gap_ms` (30 ms por omisión). No se recorta ni se normaliza nada:
-  los bytes viajan íntegros en ambos sentidos.
+- **Framing obligatorio**: cada comando viaja envuelto en
+  `STX (0x02) + comando + ETX (0x03) + LRC`.
+  - `LRC = XOR(comando + ETX)` (el STX no entra en el cálculo).
+  - La impresora **no responde** a texto plano (`S1\r\n` → NAK 0x15 o silencio).
+  - El driver `tfhka` añade la envoltura automáticamente; si el cliente (Profit
+    Plus vía COM virtual) ya envía tramas con STX, el driver las reenvía tal cual
+    sin re-envolver.
+- Respuesta: la impresora contesta con la misma envoltura
+  `STX + datos + ETX + LRC`, o un byte `NAK (0x15)` si rechaza el comando.
+- **Delimitación por silencio**: una trama termina cuando el emisor deja de enviar
+  durante `read_gap_ms` (100 ms en producción). El driver descarta STX/ETX/LRC
+  antes de interpretar (S1, S5, Describe), pero **el agente recibe los bytes
+  íntegros** (incluyendo la envoltura) vía `response_base64`.
 
 ## 2. Comandos usados
 
@@ -41,6 +47,31 @@ impresora.
 Ítems de factura: `prefijo + cantidad(8.3) + precio(10.2) + descripción`, con
 `!` = alícuota general (16 %), `"` = reducida (8 %), `#` = adicional (30 %),
 espacio = exento.
+
+### Secuencia canónica de una factura
+
+La referencia ordena la venta así (y el compilador `structured` la replica):
+
+```
+iR*J-12345678-9            datos del cliente (RIF)
+iS*CLIENTE C.A.            nombre
+i01Av. Principal           dirección
+i02 0212-1234567           teléfono
+!   2.000     50.00HARINA  ítems
+"   3.000     10.50PAN
+3                          subtotal impreso (si hay pagos)
+70010.00                   descuento global
+7015.00                    recargo global
+103tarjeta                 medio de pago (sólo si no es efectivo)
+100126.50                  pago
+101                        cierre y totalización
+```
+
+Los datos del cliente van **antes** del primer ítem. Por eso el spooler
+clasifica esas líneas como apertura de documento: el turno exclusivo se toma
+desde la primera línea y ninguna otra estación puede intercalar su factura entre
+el cliente y los ítems. El documento en la impresora se abre con el primer ítem;
+el turno se libera con `101`.
 
 ## 3. Bloque de estado y errores
 

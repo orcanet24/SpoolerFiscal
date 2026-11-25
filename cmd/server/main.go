@@ -30,6 +30,7 @@ func main() {
 func run(ctx context.Context, configPath string) error {
 	cfg, err := config.LoadServer(configPath)
 	if err != nil {
+		logging.ReportConfigError(err, configPath, "logs/server.log")
 		return err
 	}
 	logger, closeLog, err := logging.Setup(cfg.Logging, "logs/server.log")

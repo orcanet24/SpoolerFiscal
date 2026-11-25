@@ -4,28 +4,47 @@ Este documento responde los cinco puntos que la solicitud pide confirmar antes d
 empezar. Cada decisión se tomó con lo disponible en el equipo de desarrollo y
 queda aislada detrás de una interfaz para poder cambiarla sin tocar el resto.
 
-## 1. Modelo de impresora fiscal: TFHKA (The Factory HKA), protocolo ASCII
+## 1. Modelo de impresora fiscal: dos familias de protocolo
 
-**Decisión:** el driver implementado es `tfhka` (The Factory HKA), con el conjunto
-de comandos ASCII documentado en [`PROTOCOLO_TFHKA.md`](PROTOCOLO_TFHKA.md):
-`S1`…`S8P`, `101`, `3`, `100/103`, `80$`/`81`, `d1`/`d2`, `U0X`/`U0Z`, items con
-prefijo `!`, `"`, `#`, espacio.
+**Decisión:** están implementadas dos familias, elegidas con `printer.driver`:
 
-**Por qué:** es la marca más difundida en Venezuela, la que ya emula el
-`SimuladorFiscalGO` del mismo autor (referencia byte a byte) y permite validar
-todo el circuito sin hardware fiscal.
+- `tfhka` (The Factory HKA): conjunto de comandos ASCII documentado en
+  [`PROTOCOLO_TFHKA.md`](PROTOCOLO_TFHKA.md): `S1`…`S8P`, `101`, `3`, `100/103`,
+  `80$`/`81`, `d1`/`d2`, `U0X`/`U0Z`, ítems con prefijo `!`, `"`, `#`, espacio.
+- `hasar`, `bixolon`, `epson` (IxBatch): `@OpenFiscalReceipt`,
+  `@CustomerData`, `@PrintLineItem`, `@AddPayment`, `@Close`, `@Status`,
+  `@PrintXReport`/`@PrintZReport`. Epson antepone `0xESTADO|0xERROR|` a cada
+  respuesta.
+
+**Por qué:** TFHKA es la marca más difundida en Venezuela y la que ya emula el
+`SimuladorFiscalGO` del mismo autor (referencia byte a byte). Hasar SMH/P-615F,
+Bixolon SRP-270 y Epson TM2000 comparten IxBatch en esa referencia, de modo que
+una sola implementación cubre las tres. Validar todo el circuito sin hardware
+fiscal es requisito del proyecto.
 
 **Cómo cambiarla:** `internal/fiscal/printer.go` define `Printer`
-(`Open/Close/SendCommand/ReadResponse/GetStatus/GetInfo/Describe`).
-`internal/fiscal/New(driver, opts)` selecciona la implementación. Para Hasar,
-Bixolon o Epson se agrega un archivo con el protocolo IxBatch (`@OpenFiscalReceipt`,
-`@PrintLine`, `@Close`…) y se registra en `New`; ni el agente, ni la cola, ni la
-persistencia cambian.
+(`Open/Close/SendCommand/ReadResponse/GetStatus/GetInfo/Describe/Step`) y el
+registro de marcas. `internal/fiscal/New(driver, opts)` selecciona la
+implementación. Para una marca de otra familia se agrega un archivo con su
+protocolo y se registra con `fiscal.RegisterDriver`; ni el agente, ni la cola, ni
+la persistencia cambian. El agente de estación transporta bytes sin interpretar
+el protocolo, así que la marca es una decisión **del servidor**.
 
-**A confirmar con el cliente (crítico):** marca, modelo exacto y firmware. Si la
-impresora es otra marca, el protocolo cambia y hay que implementar ese driver.
-Si el firmware devuelve un bloque de estado distinto al Anexo 1/2, se ajusta
-`Describe` en `internal/fiscal/tfhka.go`.
+**Diferencias entre familias que el spooler ya contempla:**
+
+- Cierre de recuperación: `101` en TFHKA, `@Close` en IxBatch
+  (`fiscal.DocumentCloser`).
+- Sonda de estado: `S2` en TFHKA, `@Status` en IxBatch (el driver corrige el
+  valor del YAML).
+- Correlativo: TFHKA lo concilia antes de abrir factura (`S1`); en IxBatch el
+  número llega en la respuesta del cierre y se audita en ese momento. No se
+  inventa un pre-vuelo que el protocolo no ofrece.
+- `/v1/invoices/structured` compila TFHKA; con otro driver responde `501` para
+  no enviar una secuencia sin validar.
+
+**A confirmar con el cliente (crítico):** marca, modelo exacto y firmware. Si el
+firmware devuelve un bloque de estado distinto al Anexo 1/2, se ajusta
+`Describe` en `internal/fiscal/tfhka.go` o `internal/fiscal/ixbatch.go`.
 
 ## 2. Puerto COM virtual: par de com0com (driver existente, sin código de kernel propio)
 
@@ -123,10 +142,32 @@ Dos decisiones de seguridad y fiscalidad:
   vuelve a imprimir; se guarda la respuesta en SQLite y se purga por retención.
 - **Dos niveles de emisión**: `/v1/invoices` recibe líneas TFHKA ya formateadas
   (vía canónica, el servidor no interpreta fiscalidad) y
-  `/v1/invoices/structured` compila ítems, alícuotas y totales con reglas
-  explícitas, validando el total contra lo calculado antes de imprimir. El
-  compilador no cubre cliente, pagos ni descuentos; ampliarlo exige validación
-  contra la impresora real.
+  `/v1/invoices/structured` compila la venta completa: datos del cliente,
+  ítems, subtotal, descuento/recargo, formas de pago y cierre, en el orden
+  canónico de la referencia. Valida el total antes de imprimir y exige que los
+  pagos cubran el neto. No cubre la referencia a una factura original para
+  notas de crédito: eso se envía por `/v1/invoices` con `iF*`/`iD*`/`iI*`.
+  El compilador sólo emite TFHKA; con otro driver responde `501` para no enviar
+  una secuencia sin validar.
+
+## 7. Seguridad de la API: token por estación y mTLS
+
+**Decisión:** el token compartido se mantiene para la API externa, y se agrega
+`station_tokens` para atar cada estación a su propio token. Con token propio, la
+estación sólo puede emitir en su nombre (`403` si pide otra) y el compartido deja
+de representarla. La comparación es en tiempo constante.
+
+**mTLS:** `tls.ca_file` activa `RequireAndVerifyClientCert`; el agente presenta
+`cert_file`/`key_file`. Sin `ca_file`, TLS es de un solo sentido y el token
+autentica al cliente.
+
+**Por qué:** una caja comprometida no debe poder facturar como otra, y el token
+compartido en un `.env` de estación es un secreto que viaja a todos lados. La
+alternativa (un único token) era simple pero no distinguía estaciones.
+
+**El panel `/admin` no se autentica por sí mismo:** la página es pública y no
+contiene secretos; pide el token y lo guarda sólo en la sesión del navegador.
+Las operaciones sensibles (cancelar/reintentar) siguen exigiendo token.
 
 Los comandos externos se normalizan con `printer.command_terminator` (por
 omisión `\r\n`): Profit Plus ya envía el suyo y no se duplica. Con `\r` solo, la

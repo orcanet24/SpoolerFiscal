@@ -254,10 +254,17 @@
 <section id="puesta-en-marcha">
   <h2>3. Puesta en marcha</h2>
 
+  <h3>Instalación en 2 pasos (recomendada)</h3>
+  <ol>
+    <li>Compile: doble clic en <code>build.bat</code> (o <code>.\scripts\build.ps1</code>).</li>
+    <li>Doble clic en <code>INSTALAR.bat</code> y elija <em>Servidor</em> o <em>Estación</em>.</li>
+  </ol>
+  <p>El instalador copia los binarios a <code>C:\SpoolerFiscal</code>, genera la configuración, restringe permisos, crea el <strong>servicio de Windows</strong> con inicio automático y reinicio ante fallos, abre el firewall (servidor) y comprueba que arranca. Las secciones siguientes describen la instalación manual, útil para entender qué hace o para casos especiales.</p>
+
   <h3>Requisitos</h3>
   <ul>
     <li>Windows 10/11 o Server 2019/2022, 64 bits.</li>
-    <li>Go 1.25 o superior <em>sólo para compilar</em>; los binarios no necesitan Go.</li>
+    <li>Go 1.26 o superior <em>sólo para compilar</em>; los binarios no necesitan Go.</li>
     <li>Impresora fiscal TFHKA con puerto serie (o adaptador USB-serie).</li>
     <li>Driver <strong>com0com</strong> en cada estación (par de puertos virtuales).</li>
     <li>Permisos de administrador para instalar servicios y com0com.</li>
@@ -344,11 +351,11 @@ agent.exe  -docs</code><span class="lang">bash</span></pre>
 
 <section id="api">
   <h2>3.1 API HTTP</h2>
-  <p>La API vive dentro de <code>server.exe</code> y comparte cola, turno y correlativo con las estaciones. Se configura con <code>http.listen</code>. Todas las rutas salvo la salud exigen el token compartido.</p>
+  <p>La API vive dentro de <code>server.exe</code> y comparte cola, turno y correlativo con las estaciones. Se configura con <code>http.listen</code>. Todas las rutas salvo la salud exigen token: el compartido (<code>token</code>) o el de la estación (<code>station_tokens</code>).</p>
 
   <h3>Autenticación</h3>
   <pre><code>Authorization: Bearer CAMBIAR-ESTE-TOKEN</code><span class="lang">http</span></pre>
-  <p>También se acepta <code>X-Spooler-Token</code>. Si la API cruza la red de la empresa, active <code>tls.enabled</code>: el servidor sirve HTTPS con el mismo certificado.</p>
+  <p>También se acepta <code>X-Spooler-Token</code>. Con <code>station_tokens</code>, cada estación tiene su token y sólo puede emitir en su propio nombre; el compartido no la representa. Si la API cruza la red de la empresa, active <code>tls.enabled</code> (HTTPS); con <code>tls.ca_file</code> exige certificado de cliente (mTLS).</p>
 
   <h3>Endpoints</h3>
   <table>
@@ -360,7 +367,11 @@ agent.exe  -docs</code><span class="lang">bash</span></pre>
       <tr><td><span class="badge get">GET</span></td><td><code>/v1/documents</code></td><td>Historial fiscal (<code>?limit=50</code>).</td></tr>
       <tr><td><span class="badge post">POST</span></td><td><code>/v1/commands</code></td><td>Un comando fiscal suelto (sondas, reportes X/Z).</td></tr>
       <tr><td><span class="badge post">POST</span></td><td><code>/v1/invoices</code></td><td>Factura completa con líneas TFHKA.</td></tr>
-      <tr><td><span class="badge post">POST</span></td><td><code>/v1/invoices/structured</code></td><td>Factura desde ítems y totales JSON; el servidor la compila.</td></tr>
+      <tr><td><span class="badge post">POST</span></td><td><code>/v1/invoices/structured</code></td><td>Factura desde ítems JSON (cliente, descuento, pagos); el servidor la compila.</td></tr>
+      <tr><td><span class="badge get">GET</span></td><td><code>/v1/jobs</code></td><td>Cola duradera de facturas REST (<code>?status=</code>).</td></tr>
+      <tr><td><span class="badge post">POST</span></td><td><code>/v1/jobs/{id}/cancel</code></td><td>Cancela un trabajo que no llegó a papel.</td></tr>
+      <tr><td><span class="badge post">POST</span></td><td><code>/v1/jobs/{id}/retry</code></td><td>Reencola un trabajo sin líneas impresas.</td></tr>
+      <tr><td><span class="badge get">GET</span></td><td><code>/admin</code></td><td>Panel de operación (HTML; pide el token en el navegador).</td></tr>
     </tbody>
   </table>
 
@@ -391,9 +402,10 @@ agent.exe  -docs</code><span class="lang">bash</span></pre>
       <tr><td>400</td><td><code>invalid_request</code></td><td>Revise el JSON, la estación o las líneas.</td></tr>
       <tr><td>400</td><td><code>totals_mismatch</code></td><td>Los totales enviados no coinciden con los calculados.</td></tr>
       <tr><td>401</td><td><code>unauthorized</code></td><td>Token ausente o incorrecto.</td></tr>
-      <tr><td>403</td><td><code>station_not_allowed</code></td><td>La estación no está en <code>allowed_stations</code>.</td></tr>
+      <tr><td>403</td><td><code>station_not_allowed</code></td><td>La estación no está en <code>allowed_stations</code>, o el token de una estación intenta emitir como otra.</td></tr>
       <tr><td>409</td><td><code>printer_blocked</code></td><td>Papel agotado, memoria llena o error fiscal.</td></tr>
       <tr><td>429</td><td><code>queue_full</code></td><td>Cola llena: espere y reintente.</td></tr>
+      <tr><td>501</td><td><code>structured_not_supported</code></td><td>El driver no es TFHKA: use <code>/v1/invoices</code> con líneas nativas.</td></tr>
       <tr><td>503</td><td><code>printer_unavailable</code></td><td>Impresora apagada o sin respuesta.</td></tr>
       <tr><td>504</td><td><code>timeout</code></td><td>Venció en la cola; ese comando no se imprimió.</td></tr>
     </tbody>
@@ -402,7 +414,7 @@ agent.exe  -docs</code><span class="lang">bash</span></pre>
 
 <section id="factura-items">
   <h2>3.2 Factura desde ítems y totales</h2>
-  <p>Es la vía recomendada para ecommerce, ERP o CRM. Se envía la factura como ítems; el servidor genera las líneas TFHKA, valida el total y ejecuta la factura de forma atómica.</p>
+  <p>Es la vía recomendada para ecommerce, ERP o CRM. Se envía la factura como ítems; el servidor genera las líneas TFHKA, valida el total y ejecuta la factura de forma atómica. También acepta <code>customer</code> (RIF, nombre, dirección, teléfono), <code>discount</code>/<code>surcharge</code> globales y <code>payments</code> (medio y monto); con pagos imprime el subtotal y valida que cubran el neto antes de imprimir.</p>
 
   <pre><code>curl -X POST http://127.0.0.1:8080/v1/invoices/structured \
   -H "Authorization: Bearer CAMBIAR-ESTE-TOKEN" \
@@ -1152,7 +1164,7 @@ Impresora: 0|Factura 6|Total: 20.00|Impreso:6</code></pre></div>
   <p>Un servidor atiende una impresora. Para dos, ejecute dos instancias con puertos, bases y tokens distintos, y asigne cada estación a la suya.</p>
 
   <h4>¿Sirve para otra marca?</h4>
-  <p>Hoy sólo TFHKA (The Factory HKA, ASCII). El driver está aislado en <code>internal/fiscal</code>; otra marca requiere un driver nuevo (por ejemplo IxBatch) y validación con el hardware.</p>
+  <p>Sí, para las familias implementadas: TFHKA (ASCII) y Hasar SMH/P-615F, Bixolon SRP-270 y Epson TM2000 (IxBatch <code>@...</code>), elegidas con <code>printer.driver</code>. La marca es una decisión del servidor: el agente de estación transporta bytes y no hay que reinstalar las cajas. Otra marca requiere implementar su protocolo en <code>internal/fiscal</code> y validarlo con el hardware.</p>
 
   <h4>¿Puedo facturar sin Profit Plus?</h4>
   <p>Sí. La API REST existe justamente para eso: ecommerce, ERP web o CRM envían la factura por HTTP. El agente y com0com sólo son necesarios para las cajas con Profit Plus.</p>

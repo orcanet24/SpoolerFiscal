@@ -24,10 +24,17 @@ La API HTTP vive **dentro de `server.exe`** y usa el mismo `Spooler`:
 - el mismo turno exclusivo por factura que las estaciones COM;
 - el mismo guardián de estado (papel, memoria, errores);
 - la misma auditoría SQLite y los mismos permisos de archivo;
-- un solo binario, un solo servicio de Windows, un solo token.
+- **un solo binario, un solo servicio de Windows, un solo token**.
 
 Si el volumen crece, el cuello de botella seguirá siendo la impresora (0,3-1
 factura/s), no el transporte.
+
+> **Nota importante (2026-11-24)**: el protocolo real de la HKA80 **no es texto
+> plano**. Cada comando viaja en una trama `STX + comando + ETX + LRC`. El
+> servidor lo implementa en `internal/fiscal/stxframe.go`. Si su sistema externo
+> envía comandos crudos, use `command_base64` y recibirá `response_base64` con
+> la trama completa (incluyendo STX/ETX/LRC). El campo `response` (texto) ya
+> viene sin la envoltura para consumo humano.
 
 ## Activación
 
@@ -57,15 +64,57 @@ curl http://127.0.0.1:8080/v1/health
 
 ## Autenticación
 
-Todas las rutas salvo `/v1/health` exigen el token compartido:
+Todas las rutas salvo `/v1/health` exigen token:
 
 ```
 Authorization: Bearer <token>
 ```
 
-También se acepta `X-Spooler-Token: <token>`. El token es el mismo de las
-estaciones (`token` del YAML o `SPOOLER_TOKEN`). Se compara en tiempo constante.
-Use HTTPS si la API cruza la red de la empresa; no exponga el puerto a Internet.
+También se acepta `X-Spooler-Token: <token>`. Se compara en tiempo constante.
+
+- `token` (o `SPOOLER_TOKEN`) es el token compartido: lo usan la API externa y
+  las estaciones que no tengan token propio.
+- `station_tokens` da a cada estación su token. Un token de estación **sólo puede
+  emitir en su propia estación**: si el cuerpo pide otra, responde `403`. Y el
+  token compartido **no representa** a una estación que tenga token propio: esa
+  estación debe usar el suyo.
+- `tls.enabled` sirve HTTPS. Con `tls.ca_file`, el servidor exige certificado de
+  cliente (mTLS) y el agente debe configurar `cert_file`/`key_file`.
+
+No exponga el puerto a Internet.
+
+## Formato de comandos y respuestas (STX/ETX/LRC)
+
+La impresora HKA80 **exige framing binario**: cada comando viaja como
+`STX (0x02) + payload + ETX (0x03) + LRC`. El servidor lo hace por usted.
+
+| Campo en JSON | Qué envía/recibe | Cuándo usarlo |
+|---------------|------------------|---------------|
+| `command` | Texto plano (ej. `"S1"`). El servidor añade STX/ETX/LRC. | Pruebas rápidas, curl manual. |
+| `command_base64` | **Bytes exactos** que quiere enviar (puede incluir STX/ETX/LRC si ya los tiene). | Integraciones serias, agentes, ecommerce. Evita problemas de escape JSON. |
+| `response` | Texto legible (UTF-8 válido) **sin STX/ETX/LRC**. | Consumo humano, logs, debugging. |
+| `response_base64` | **Bytes íntegros** que devolvió la impresora (incluye STX/ETX/LRC). | Auditoría, verificación byte a byte, reenvío a COM virtual. |
+
+**Ejemplo con `command_base64`:**
+```bash
+# S1 codificado en base64
+curl -X POST http://127.0.0.1:8080/v1/commands \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"station":"TEST-CAJA","command_base64":"UzE="}'
+```
+
+**Respuesta:**
+```json
+{
+  "station": "TEST-CAJA",
+  "session": "api:TEST-CAJA",
+  "response": "S100\n00000000000000000\n00010850\n...",
+  "response_base64": "AlMxMDAKMDAwMDAwMDAwMDAwMDAwMDAK...",  # trama completa con STX/ETX/LRC
+  "sequence": 6,
+  "status": { "online": true, "raw": "S100\n00000000000000000\n..." }
+}
+```
 
 ## Endpoints
 
@@ -77,7 +126,12 @@ Use HTTPS si la API cruza la red de la empresa; no exponga el puerto a Internet.
 | `GET` | `/v1/documents?limit=50` | Historial fiscal registrado |
 | `POST` | `/v1/commands` | Un comando fiscal suelto (equivalente a `SendCommand`) |
 | `POST` | `/v1/invoices` | Una factura completa (líneas TFHKA), atómica y con turno exclusivo |
-| `POST` | `/v1/invoices/structured` | Una factura desde ítems y totales JSON, compilada a TFHKA |
+| `POST` | `/v1/invoices/structured` | Una factura desde ítems JSON, compilada a TFHKA |
+| `GET` | `/v1/jobs?status=` | Cola duradera de facturas REST |
+| `GET` | `/v1/jobs/{id}` | Detalle y resultado de un trabajo |
+| `POST` | `/v1/jobs/{id}/cancel` | Cancela un trabajo que no llegó a papel |
+| `POST` | `/v1/jobs/{id}/retry` | Reencola un trabajo sin líneas impresas |
+| `GET` | `/admin` | Panel de operación (HTML; pide token en el navegador) |
 
 La sesión de una petición REST es implícita: `api:<station>`. No hay que abrir ni
 cerrar sesión.
@@ -203,6 +257,65 @@ Respuesta (`201`):
 | `additional` | `#` | 30 % |
 | `exempt` | espacio | 0 % |
 
+### Cliente, descuento y pagos
+
+El compilador también arma la venta completa en el orden canónico de TFHKA:
+cliente, ítems, subtotal, descuento/recargo, medio de pago, pago y cierre.
+
+```bash
+curl -X POST http://127.0.0.1:8080/v1/invoices/structured \
+  -H "Authorization: Bearer CAMBIAR-ESTE-TOKEN" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: pedido-1002" \
+  -d '{
+    "station": "ECOM-01",
+    "client_ref": "pedido-1002",
+    "customer": {"rif": "J-12345678-9", "name": "CLIENTE C.A.",
+                 "address": "Av. Principal, Caracas", "phone": "0212-1234567"},
+    "items": [
+      {"description": "HARINA 1KG", "quantity": 2, "unit_price": 50.00, "tax": "general"},
+      {"description": "PAN", "quantity": 3, "unit_price": 10.50, "tax": "reduced"}
+    ],
+    "discount": 10.00,
+    "surcharge": 5.00,
+    "payments": [{"method": "tarjeta", "amount": 126.50}],
+    "totals": {"total": 126.50}
+  }'
+```
+
+Genera:
+
+```
+iR*J-12345678-9
+iS*CLIENTE C.A.
+i01Av. Principal, Caracas
+i020212-1234567
+!   2.000     50.00HARINA 1KG
+"   3.000     10.50PAN
+3
+70010.00
+7015.00
+103tarjeta
+100126.50
+101
+```
+
+| Campo | Efecto |
+| --- | --- |
+| `customer` | `iR*`/`iS*`/`i01`/`i02`; los campos vacíos se omiten |
+| `discount` | `700<monto>` global |
+| `surcharge` | `701<monto>` global |
+| `payments` | `100<monto>`; `method` distinto de `cash` añade `103<medio>` |
+| `totals` | se valida el total; con descuento/recargo no se compara el desglose |
+
+Reglas: los pagos deben cubrir el total (si sobra, es vuelto); el descuento no
+puede exceder el total; cliente y medio de pago son ASCII imprimible, sin `|` ni
+CR/LF. El total de la respuesta es el neto (ítems − descuento + recargo) y
+`subtotal`/`tax` son los del bruto de los ítems.
+
+La secuencia empieza por los datos del cliente, así que el spooler toma el turno
+exclusivo desde esa primera línea y no puede intercalarse otra estación.
+
 - `unit_price` es el precio **con IVA incluido**, como lo maneja la TFHKA.
 - `quantity` admite hasta 3 decimales (0.001-9999.999); `unit_price` hasta 2
   (0-9.999.999,99). Fuera de rango se rechaza para no romper el ancho fijo.
@@ -275,6 +388,26 @@ quedar retenido hasta `queue.document_lock_timeout_ms`. La respuesta incluye
 `document_open` y `document_owner`; el operador puede esperar la liberación
 automática o intervenir en la impresora.
 
+## Cancelar y reintentar un trabajo
+
+La cola REST es duradera (`print_jobs`). Un trabajo que no llegó a papel puede
+descartarse o reencolarse sin riesgo fiscal:
+
+| Operación | Efecto |
+| --- | --- |
+| `POST /v1/jobs/{id}/cancel` | `queued` o `paused` con avance cero → `canceled`. Libera la `Idempotency-Key` para que el mismo pedido pueda re-emitirse. |
+| `POST /v1/jobs/{id}/retry` | `queued` o `paused` con avance cero → vuelve a la cola (202). El despachador lo ejecuta en el siguiente ciclo. |
+
+Ninguna de las dos toca una factura que ya empezó a imprimirse: `cancel`
+responde `409 job_not_cancelable` y `retry` responde `409 job_not_retryable`
+cuando hay líneas impresas. En ese caso la única salida es revisar el papel y
+volver a someter la factura completa como decisión de negocio.
+
+Una factura ya cerrada no se "reimprime" por API: reenviar las líneas generaría
+un **segundo documento fiscal**. Para una copia use el comando de reimpresión de
+la impresora por `/v1/commands` (según el manual de su modelo) y audítelo fuera
+del spooler.
+
 ## Códigos de error
 
 | HTTP | `code` | Significado |
@@ -334,3 +467,7 @@ await order.update({ fiscalNumber: factura.invoice_number });
 `GET /v1/health` sirve para un chequeo de vida; `GET /v1/status` añade cola,
 documento abierto, contadores y motivo de bloqueo. Ambos son de sólo lectura y no
 consumen turno.
+
+El panel de operación está en `/admin`: muestra estado, cola y documentos, y
+permite cancelar o reintentar trabajos con el token de la API. La página no
+contiene secretos; el token se guarda sólo en la pestaña del navegador.
